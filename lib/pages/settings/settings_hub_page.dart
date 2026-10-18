@@ -101,14 +101,7 @@ class SettingsHubPage extends StatelessWidget {
         const SizedBox(height: 28),
         Center(
           child: Text(
-            'Bealib ${ApiEndpoints.version}',
-            style: text.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Center(
-          child: Text(
-            '基于 Kazumi 二次开发 · GPL-3.0',
+            ApiEndpoints.version,
             style: text.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ),
