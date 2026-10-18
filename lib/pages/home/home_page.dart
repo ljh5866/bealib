@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -21,7 +22,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   static const int _pageSize = 12;
-  static const Duration _receiveTimeout = Duration(seconds: 20);
+  static const Duration _receiveTimeout = Duration(seconds: 8);
   static const double _loadMoreThreshold = 480;
 
   final List<BangumiItem> _items = <BangumiItem>[];
@@ -39,6 +40,11 @@ class _HomePageState extends State<HomePage> {
   int _offset = 0;
   int _generation = 0;
 
+  // 下一页预取缓存：首屏加载后顺手取下一页，下滑加载基本秒出。
+  int? _prefetchedOffset;
+  List<BangumiItem> _prefetchedItems = const <BangumiItem>[];
+  bool _prefetching = false;
+
   @override
   void initState() {
     super.initState();
@@ -53,8 +59,9 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  /// 推荐数据源：镜像服务在国内网络下延迟抖动较大（实测 3s–45s），
-  /// 因此这里单独放宽接收超时，并在失败时自动重试一次、再换源兜底。
+  /// 推荐数据源：镜像服务在国内网络下延迟抖动较大（实测 3s–45s）。
+  /// 这里让首选源与备选源并发竞速：首选源 0.9s 内没结果就同时跑备选源，
+  /// 谁先返回非空列表就用谁，避免串行重试把首屏拖到几十秒。
   Future<List<BangumiItem>> _fetch({
     required int limit,
     required int offset,
@@ -74,17 +81,58 @@ class _HomePageState extends State<HomePage> {
           receiveTimeout: _receiveTimeout,
         );
 
-    List<BangumiItem> list =
-        useMirror ? await queryMirror() : await queryDirect();
-    if (list.isNotEmpty) return list;
+    final Stopwatch stopwatch = Stopwatch()..start();
+    final Future<List<BangumiItem>> preferred =
+        useMirror ? queryMirror() : queryDirect();
+    final Future<List<BangumiItem>> backup = Future<void>.delayed(
+      const Duration(milliseconds: 900),
+    ).then((_) => useMirror ? queryDirect() : queryMirror());
 
-    // 失败重试一次（抖动多为单次慢响应）。
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    list = useMirror ? await queryMirror() : await queryDirect();
-    if (list.isNotEmpty) return list;
+    final List<BangumiItem> result =
+        await _firstNonEmpty(<Future<List<BangumiItem>>>[preferred, backup]);
+    if (result.isNotEmpty) return result;
 
-    // 仍失败则换源兜底。
-    return useMirror ? await queryDirect() : await queryMirror();
+    // 两个源都失败且耗时很短（多为瞬时错误），再并发重试一次；耗时已长就不再拖。
+    if (stopwatch.elapsed < const Duration(seconds: 4)) {
+      return _firstNonEmpty(<Future<List<BangumiItem>>>[
+        queryMirror(),
+        queryDirect(),
+      ]);
+    }
+    return const <BangumiItem>[];
+  }
+
+  /// 返回第一个非空结果；全部为空/失败时返回空列表。
+  static Future<List<BangumiItem>> _firstNonEmpty(
+    List<Future<List<BangumiItem>>> futures,
+  ) {
+    final Completer<List<BangumiItem>> completer =
+        Completer<List<BangumiItem>>();
+    int pending = futures.length;
+    bool settled = false;
+
+    void finish(List<BangumiItem> value) {
+      if (settled) return;
+      settled = true;
+      completer.complete(value);
+    }
+
+    for (final Future<List<BangumiItem>> future in futures) {
+      future.then((List<BangumiItem> list) {
+        if (settled) return;
+        if (list.isNotEmpty) {
+          finish(list);
+          return;
+        }
+        pending--;
+        if (pending == 0) finish(const <BangumiItem>[]);
+      }).catchError((Object _) {
+        if (settled) return;
+        pending--;
+        if (pending == 0) finish(const <BangumiItem>[]);
+      });
+    }
+    return completer.future;
   }
 
   void _onScroll() {
@@ -134,6 +182,8 @@ class _HomePageState extends State<HomePage> {
   /// [startOffset] 为 0 表示首屏/回到第一页；下拉刷新会随机换一个起始页。
   Future<void> _load({int startOffset = 0}) async {
     final int generation = ++_generation;
+    _prefetchedOffset = null;
+    _prefetchedItems = const <BangumiItem>[];
     final Set<int>? previousIds =
         _items.isEmpty ? null : _items.map((item) => item.id).toSet();
     if (mounted) {
@@ -207,10 +257,31 @@ class _HomePageState extends State<HomePage> {
       }
       _loading = false;
     });
+    if (result.isNotEmpty) {
+      unawaited(_prefetchNextPage());
+    }
   }
 
   /// 下拉刷新：随机换一页推荐内容。
   Future<void> _refresh() => _load(startOffset: _nextRefreshOffset());
+
+  Future<void> _prefetchNextPage() async {
+    if (_prefetching || !_hasMore) return;
+    final int nextOffset = _offset;
+    final int generation = _generation;
+    _prefetching = true;
+    try {
+      final List<BangumiItem> items =
+          await _fetch(limit: _pageSize, offset: nextOffset);
+      if (generation != _generation) return;
+      _prefetchedOffset = nextOffset;
+      _prefetchedItems = items;
+    } catch (_) {
+      // 预取失败不影响正常加载。
+    } finally {
+      _prefetching = false;
+    }
+  }
 
   Future<void> _loadMore() async {
     if (_loading || _loadingMore || !_hasMore) return;
@@ -221,15 +292,21 @@ class _HomePageState extends State<HomePage> {
       _loadMoreFailed = false;
     });
     List<BangumiItem> result;
-    try {
-      result = await _fetch(limit: _pageSize, offset: nextOffset);
-    } catch (_) {
-      if (!mounted || generation != _generation) return;
-      setState(() {
-        _loadingMore = false;
-        _loadMoreFailed = true;
-      });
-      return;
+    if (_prefetchedOffset == nextOffset && _prefetchedItems.isNotEmpty) {
+      result = _prefetchedItems;
+      _prefetchedOffset = null;
+      _prefetchedItems = const <BangumiItem>[];
+    } else {
+      try {
+        result = await _fetch(limit: _pageSize, offset: nextOffset);
+      } catch (_) {
+        if (!mounted || generation != _generation) return;
+        setState(() {
+          _loadingMore = false;
+          _loadMoreFailed = true;
+        });
+        return;
+      }
     }
     if (!mounted || generation != _generation) return;
 
@@ -245,6 +322,9 @@ class _HomePageState extends State<HomePage> {
       _hasMore = result.length >= _pageSize && fresh.isNotEmpty;
       _loadingMore = false;
     });
+    if (_hasMore) {
+      unawaited(_prefetchNextPage());
+    }
   }
 
   void _openSearch() {
@@ -350,14 +430,6 @@ class _HomePageState extends State<HomePage> {
                       color: scheme.onSurface,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  if (!_loading)
-                    Text(
-                      '${_items.length} 部',
-                      style: text.labelMedium?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
                 ],
               ),
             ),
