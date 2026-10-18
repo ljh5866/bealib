@@ -53,11 +53,25 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        // CI 通过环境变量注入固定签名（见 .github/workflows/release.yml）。
+        // 本地构建没有设置这些变量时，release 仍然沿用 debug 签名。
+        release {
+            if (System.getenv('BEALIB_KEYSTORE_PATH') != null) {
+                storeFile file(System.getenv('BEALIB_KEYSTORE_PATH'))
+                storePassword System.getenv('BEALIB_KEYSTORE_STORE_PASSWORD') ?: 'android'
+                keyAlias System.getenv('BEALIB_KEYSTORE_ALIAS') ?: 'androiddebugkey'
+                keyPassword System.getenv('BEALIB_KEYSTORE_KEY_PASSWORD') ?: 'android'
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig signingConfigs.debug
+            // CI 提供了固定签名时用固定签名，否则回退 debug 签名（本地 `flutter run --release`）。
+            signingConfig System.getenv('BEALIB_KEYSTORE_PATH') != null
+                ? signingConfigs.release
+                : signingConfigs.debug
         }
     }
 }

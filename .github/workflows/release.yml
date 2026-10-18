@@ -133,7 +133,17 @@ jobs:
             exit 1
           }
           keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android >/dev/null
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android \
+            | grep -m1 'SHA256:' || true
           echo "keystore OK"
+          # 显式告诉 Gradle 用哪个 keystore（不再依赖 ~/.android 默认路径）
+          {
+            echo "BEALIB_KEYSTORE_PATH=$HOME/.android/debug.keystore"
+            echo "BEALIB_KEYSTORE_STORE_PASSWORD=android"
+            echo "BEALIB_KEYSTORE_ALIAS=androiddebugkey"
+            echo "BEALIB_KEYSTORE_KEY_PASSWORD=android"
+          } >> "$GITHUB_ENV"
+
 
       - name: Flutter pub get
         run: flutter pub get
@@ -143,6 +153,15 @@ jobs:
           flutter build apk --release \
             --build-name=${{ steps.ver.outputs.version }} \
             --build-number=${{ steps.ver.outputs.build_number }}
+
+      - name: Verify signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$APK" || { echo "APK 不存在: $APK" >&2; exit 1; }
+          APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK" | grep -m1 'SHA-256 digest'
 
       - name: Collect artifacts
         id: artifact
