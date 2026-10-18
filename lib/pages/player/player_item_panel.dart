@@ -52,6 +52,7 @@ class PlayerItemPanel extends StatefulWidget {
     required this.acquirePlayerPanelHold,
     required this.onMenuVisibilityChanged,
     required this.handleDanmaku,
+    this.danmakuControlsEnabled = true,
     required this.skipOP,
     required this.showVideoInfo,
     required this.showSyncPlayPanel,
@@ -79,6 +80,9 @@ class PlayerItemPanel extends StatefulWidget {
   final PlayerPanelHold Function() acquirePlayerPanelHold;
   final ValueChanged<bool> onMenuVisibilityChanged;
   final VoidCallback handleDanmaku;
+
+  /// 弹幕功能关闭时不显示任何弹幕入口。
+  final bool danmakuControlsEnabled;
   final VoidCallback onNextEpisode;
   final VoidCallback skipOP;
   final VoidCallback showVideoInfo;
@@ -171,7 +175,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
 
       final sender =
           playerController.syncplay.syncplayController?.username ?? '我';
-      playerController.danmaku.canvasController.addDanmaku(
+      playerController.danmaku.canvasController?.addDanmaku(
         DanmakuContentItem(
           '$sender：$message',
           color: Colors.orange,
@@ -184,7 +188,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
     } else {
       // This provider has no send API; display a local echo.
       playerController.danmaku.canvasController
-          .addDanmaku(DanmakuContentItem(message, selfSend: true));
+          ?.addDanmaku(DanmakuContentItem(message, selfSend: true));
     }
     textController.clear();
   }
@@ -395,6 +399,9 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   }
 
   Widget _buildDanmakuToggleButton(BuildContext context) {
+    if (!widget.danmakuControlsEnabled) {
+      return const SizedBox.shrink();
+    }
     return Observer(builder: (context) {
       final danmakuLoading = playerController.danmaku.danmakuLoading;
       final danmakuOn = playerController.danmaku.danmakuOn;
@@ -602,7 +609,7 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   void _showDanmakuSettings() {
     showDanmakuSettingsSheet(
       context: context,
-      danmakuController: playerController.danmaku.canvasController,
+      danmakuController: playerController.danmaku.canvasController!,
       onUpdateDanmakuSpeed: playerController.updateDanmakuSpeed,
       onTimelineOffsetChanged:
           playerController.danmaku.clearAndInvalidateScheduledDanmakus,
@@ -659,14 +666,16 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         menuChildren: items,
       );
 
-  Widget get _danmakuSettingsButton => IconButton(
+  Widget get _danmakuSettingsButton =>
+      !widget.danmakuControlsEnabled ? const SizedBox.shrink() : IconButton(
         onPressed: _showDanmakuSettings,
         color: Colors.white,
         icon: _cachedDanmakuSettingsIcon,
         tooltip: '弹幕设置',
       );
 
-  Widget get _desktopDanmakuControls => LayoutBuilder(
+  Widget get _desktopDanmakuControls =>
+      !widget.danmakuControlsEnabled ? const SizedBox.shrink() : LayoutBuilder(
         builder: (context, constraints) => Center(
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -685,7 +694,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
         label: '一起看',
       );
 
-  Widget get _danmakuSettingsMenuItem => BealibMenuItem(
+  Widget get _danmakuSettingsMenuItem =>
+      !widget.danmakuControlsEnabled ? const SizedBox.shrink() : BealibMenuItem(
         onPressed: _showDanmakuSettings,
         label: '弹幕设置',
       );
@@ -693,17 +703,21 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
   Widget get _wideControls => Row(children: [
         if (_desktop) Expanded(child: _desktopDanmakuControls),
         if (!_desktop) ...[
-          IconButton(
-            color: Colors.white,
-            icon: playerController.danmaku.danmakuOn
-                ? _danmakuOnIcon(context)
-                : _cachedDanmakuOffIcon,
-            onPressed: widget.handleDanmaku,
-            tooltip: playerController.danmaku.danmakuOn ? '关闭弹幕' : '打开弹幕',
-          ),
-          if (playerController.danmaku.danmakuOn) ...[
-            _danmakuSettingsButton,
-            Expanded(child: _danmakuEditBarrier(_danmakuTextField)),
+          if (widget.danmakuControlsEnabled) ...[
+            IconButton(
+              color: Colors.white,
+              icon: playerController.danmaku.danmakuOn
+                  ? _danmakuOnIcon(context)
+                  : _cachedDanmakuOffIcon,
+              onPressed: widget.handleDanmaku,
+              tooltip:
+                  playerController.danmaku.danmakuOn ? '关闭弹幕' : '打开弹幕',
+            ),
+            if (playerController.danmaku.danmakuOn) ...[
+              _danmakuSettingsButton,
+              Expanded(child: _danmakuEditBarrier(_danmakuTextField)),
+            ] else
+              const Spacer(),
           ] else
             const Spacer(),
         ],
@@ -886,7 +900,8 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                     color: Colors.white,
                   ),
                 ),
-              if (compact) _buildDanmakuToggleButton(context),
+              if (compact && widget.danmakuControlsEnabled)
+                _buildDanmakuToggleButton(context),
               PlayerPanelHoldCollectButton(
                 acquirePlayerPanelHold: widget.acquirePlayerPanelHold,
                 bangumiItem: videoPageController.bangumiItem,
@@ -916,11 +931,13 @@ class _PlayerItemPanelState extends State<PlayerItemPanel> {
                         child: const Text('超分辨率')),
                     _syncPlayMenuItem,
                   ],
-                  BealibMenuItem(
-                    onPressed: widget.showDanmakuSwitch,
-                    label: '弹幕切换',
-                  ),
-                  if (compact) _danmakuSettingsMenuItem,
+                  if (widget.danmakuControlsEnabled)
+                    BealibMenuItem(
+                      onPressed: widget.showDanmakuSwitch,
+                      label: '弹幕切换',
+                    ),
+                  if (compact && widget.danmakuControlsEnabled)
+                    _danmakuSettingsMenuItem,
                   BealibMenuItem(
                     onPressed: widget.showVideoInfo,
                     label: '视频详情',

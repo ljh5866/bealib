@@ -8,6 +8,7 @@ import 'package:bealib/plugins/plugins_controller.dart';
 import 'package:bealib/repositories/download_repository.dart';
 import 'package:bealib/services/download/background_download_service.dart';
 import 'package:bealib/services/download/download_manager.dart';
+import 'package:bealib/utils/feature_flags.dart';
 import 'package:bealib/utils/format.dart';
 import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/storage/storage.dart';
@@ -702,6 +703,7 @@ abstract class _DownloadController with Store {
   void _fetchAndCacheDanmakuAsync(
       String recordKey, int bangumiId, int episodeNumber) {
     Future(() async {
+      if (!kDanmakuFeatureEnabled) return;
       try {
         BealibLogger().i(
             'DownloadController: fetching danmaku for episode $episodeNumber (async)');

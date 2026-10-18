@@ -128,7 +128,7 @@ class _VideoPageState extends State<VideoPage>
       if (playerController.danmaku.danmakuOn &&
           event.username != localUsername &&
           event.fromRemote) {
-        playerController.danmaku.canvasController.addDanmaku(
+        playerController.danmaku.canvasController?.addDanmaku(
           DanmakuContentItem(
             displayText,
             color: Colors.orange,

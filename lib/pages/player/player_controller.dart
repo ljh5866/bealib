@@ -339,7 +339,7 @@ class PlayerController implements Disposable {
   Future<void> pause({bool enableSync = true}) async {
     final player = playback.mediaPlayer;
     if (player == null) return;
-    danmaku.canvasController.pause();
+    danmaku.canvasController?.pause();
     try {
       await player.pause();
     } catch (_) {
@@ -357,7 +357,7 @@ class PlayerController implements Disposable {
   Future<void> play({bool enableSync = true}) async {
     final player = playback.mediaPlayer;
     if (player == null) return;
-    danmaku.canvasController.resume();
+    danmaku.canvasController?.resume();
     try {
       await player.play();
     } catch (_) {

@@ -7,7 +7,6 @@ import 'package:bealib/bean/settings/settings_detail_scaffold.dart';
 import 'package:bealib/bean/settings/settings_dropdown_tile.dart';
 import 'package:bealib/pages/player/controller/player_aspect_ratio.dart';
 import 'package:bealib/pages/settings/low_memory_mode_settings.dart';
-import 'package:bealib/utils/constants.dart';
 import 'package:bealib/services/storage/storage.dart';
 import 'package:bealib/services/player/pip_utils.dart';
 import 'package:bealib/bean/settings/settings_list.dart';
@@ -235,6 +234,19 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
       title: const Text('播放设置'),
       body: SettingsList(
         sections: [
+          SettingsSection(
+            title: const Text('弹幕'),
+            tiles: [
+              SettingsTile.switchTile(
+                leading: Icons.subtitles_rounded,
+                title: const Text('弹幕'),
+                description: const Text('暂未开放'),
+                initialValue: false,
+                onToggle: (_) {},
+                enabled: false,
+              ),
+            ],
+          ),
           SettingsSection(
             title: Text('解码与渲染'),
             tiles: [

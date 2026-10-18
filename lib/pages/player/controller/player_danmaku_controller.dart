@@ -92,7 +92,8 @@ abstract class _PlayerDanmakuController with Store {
   final bool Function() isLocalPlayback;
   final DownloadController downloadController;
 
-  late canvas.DanmakuController canvasController;
+  /// 弹幕层被移除时为 null。
+  canvas.DanmakuController? canvasController;
 
   final Map<int, List<DanmakuEntry>> danDanmakus = {};
   @observable
@@ -132,7 +133,7 @@ abstract class _PlayerDanmakuController with Store {
 
   void clearAndInvalidateScheduledDanmakus() {
     _scheduledDanmakuGeneration++;
-    canvasController.clear();
+    canvasController?.clear();
   }
 
   // Apply fetched data only after VideoPageController validates the session.
@@ -330,7 +331,8 @@ abstract class _PlayerDanmakuController with Store {
     final followSpeed = GStorage.getSetting(SettingsKeys.danmakuFollowSpeed);
 
     final duration = followSpeed ? (baseDuration / playerSpeed) : baseDuration;
-    canvasController
-        .updateOption(canvasController.option.copyWith(duration: duration));
+    final controller = canvasController;
+    if (controller == null) return;
+    controller.updateOption(controller.option.copyWith(duration: duration));
   }
 }

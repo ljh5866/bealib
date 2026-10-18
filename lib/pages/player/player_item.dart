@@ -31,6 +31,7 @@ import 'package:bealib/modules/danmaku/danmaku_module.dart';
 import 'package:bealib/pages/player/controller/player_danmaku_controller.dart';
 import 'package:bealib/pages/player/danmaku_source_sheet.dart';
 import 'package:bealib/pages/player/player_item_surface.dart';
+import 'package:bealib/utils/feature_flags.dart';
 import 'package:mobx/mobx.dart' as mobx;
 import 'package:bealib/pages/my/my_controller.dart';
 import 'package:saver_gallery/saver_gallery.dart';
@@ -173,7 +174,7 @@ class _PlayerItemState extends State<PlayerItem>
     }
     try {
       if (playerController.playback.playerPlaying) {
-        playerController.danmaku.canvasController.resume();
+        playerController.danmaku.canvasController?.resume();
       }
     } catch (_) {}
   }
@@ -367,7 +368,8 @@ class _PlayerItemState extends State<PlayerItem>
       'screenshot': handleScreenshot,
       'skip': skipOP,
       'exitfullscreen': () => handleShortcutExitFullscreen(),
-      'toggledanmaku': () => handleDanmaku(),
+      if (kDanmakuFeatureEnabled)
+        'toggledanmaku': () => handleDanmaku(),
       'speed1': () => setPlaybackSpeed(1.0),
       'speed2': () => setPlaybackSpeed(2.0),
       'speed3': () => setPlaybackSpeed(3.0),
@@ -573,7 +575,8 @@ class _PlayerItemState extends State<PlayerItem>
   }
 
   void handleDanmaku() {
-    playerController.danmaku.canvasController.clear();
+    if (!kDanmakuFeatureEnabled) return;
+    playerController.danmaku.canvasController?.clear();
     if (playerController.danmaku.danmakuOn) {
       playerController.danmaku.setDanmakuEnabled(false);
       GStorage.putSetting(SettingsKeys.danmakuEnabledByDefault, false);
@@ -672,7 +675,7 @@ class _PlayerItemState extends State<PlayerItem>
   void _handleFullscreenChange() async {
     playerController.panel.lockPanel = false;
     _releasePlayerPanelHolds();
-    playerController.danmaku.canvasController.clear();
+    playerController.danmaku.canvasController?.clear();
     _scheduleAndroidPIPSourceRectSync();
 
     await _syncHistoryWithWebDav();
@@ -1163,7 +1166,7 @@ class _PlayerItemState extends State<PlayerItem>
             myController.isDanmakuBlocked(danmaku.message)) {
           return;
         }
-        playerController.danmaku.canvasController.addDanmaku(
+        playerController.danmaku.canvasController?.addDanmaku(
           DanmakuContentItem(
             danmaku.message,
             color: color,
@@ -1236,6 +1239,7 @@ class _PlayerItemState extends State<PlayerItem>
   }
 
   void showDanmakuSwitch() {
+    if (!kDanmakuFeatureEnabled) return;
     unawaited(showDanmakuSourceSheet(
       context,
       bangumiId: videoPageController.bangumiItem.id,
@@ -1259,7 +1263,7 @@ class _PlayerItemState extends State<PlayerItem>
 
   @override
   void onWindowRestore() {
-    playerController.danmaku.canvasController.clear();
+    playerController.danmaku.canvasController?.clear();
   }
 
   @override
@@ -1492,8 +1496,9 @@ class _PlayerItemState extends State<PlayerItem>
                         height: double.infinity,
                       ),
                     ),
-                    Positioned.fill(
-                      child: DanmakuScreen(
+                    if (kDanmakuFeatureEnabled)
+                      Positioned.fill(
+                        child: DanmakuScreen(
                         key: _danmuKey,
                         createdController: (DanmakuController e) {
                           playerController.danmaku.canvasController = e;
@@ -1517,9 +1522,9 @@ class _PlayerItemState extends State<PlayerItem>
                           fontFamily: _danmakuUseSystemFont
                               ? null
                               : customAppFontFamily,
+                          ),
                         ),
                       ),
-                    ),
                     Positioned.fill(
                       child: PlayerScreenshotFeedbackOverlay(
                         animation: _screenshotFeedbackAnimation,
@@ -1535,6 +1540,7 @@ class _PlayerItemState extends State<PlayerItem>
                             onBackPressed: widget.onBackPressed,
                             setPlaybackSpeed: setPlaybackSpeed,
                             showDanmakuSwitch: showDanmakuSwitch,
+                            danmakuControlsEnabled: kDanmakuFeatureEnabled,
                             onToggleSidePanel: widget.onToggleSidePanel,
                             handleFullscreen: handleFullscreen,
                             enterAndroidPictureInPicture:

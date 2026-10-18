@@ -40,12 +40,6 @@ const List<_SettingsGroup> _settingsGroups = [
         path: '/settings/player',
       ),
       _SettingsCategory(
-        label: '弹幕设置',
-        description: '弹幕来源与显示效果',
-        icon: Icons.subtitles_rounded,
-        path: '/settings/danmaku',
-      ),
-      _SettingsCategory(
         label: '操作设置',
         description: '播放器按键映射',
         icon: Icons.keyboard_rounded,
@@ -64,7 +58,7 @@ const List<_SettingsGroup> _settingsGroups = [
       ),
       _SettingsCategory(
         label: '下载设置',
-        description: '并发数与弹幕缓存',
+        description: '并发数与缓存设置',
         icon: Icons.downloading_rounded,
         path: '/settings/download-settings',
       ),

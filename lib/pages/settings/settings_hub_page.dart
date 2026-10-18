@@ -68,7 +68,7 @@ class SettingsHubPage extends StatelessWidget {
             _SettingsTileData(
               icon: Icons.display_settings_rounded,
               label: '播放设置',
-              description: '解码、渲染、弹幕与操作',
+              description: '解码、渲染与操作',
               route: '/settings/player',
             ),
             _SettingsTileData(

@@ -3,7 +3,6 @@ import 'package:bealib/modules/bangumi/bangumi_item.dart';
 import 'package:bealib/pages/info/info_controller.dart';
 import 'package:bealib/pages/info/bealib_watch_entry_page.dart';
 import 'package:bealib/pages/route_error_page.dart';
-import 'package:bealib/plugins/plugins_controller.dart';
 
 final infoModule = createModule(
   path: '/info',

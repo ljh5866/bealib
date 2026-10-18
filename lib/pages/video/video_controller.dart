@@ -19,6 +19,7 @@ import 'package:bealib/modules/comments/comment_item.dart';
 import 'package:bealib/modules/comments/comment_response.dart';
 import 'package:bealib/request/apis/bangumi_api.dart';
 import 'package:bealib/services/storage/storage.dart';
+import 'package:bealib/utils/feature_flags.dart';
 import 'package:bealib/utils/episode_url.dart';
 import 'package:bealib/utils/http_headers.dart';
 import 'package:bealib/utils/media.dart';
@@ -586,6 +587,10 @@ abstract class _VideoPageController with Store implements Disposable {
     PlaybackInitParams params,
     AsyncSession session,
   ) async {
+    if (!kDanmakuFeatureEnabled) {
+      playerController.danmaku.finishDanmakuLoad(disableDanmaku: true);
+      return;
+    }
     final danmakuSession = _danmakuSessions.begin();
     playerController.danmaku.beginDanmakuLoad();
     try {
