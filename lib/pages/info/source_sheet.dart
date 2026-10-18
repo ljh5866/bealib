@@ -1,0 +1,263 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_mobx/flutter_mobx.dart';
+import 'package:flutter_modular/flutter_modular.dart';
+import 'package:bealib/bean/dialog/dialog_helper.dart';
+import 'package:bealib/bean/dialog/material_bottom_sheet.dart';
+import 'package:bealib/bean/widget/bealib_menu.dart';
+import 'package:bealib/bean/widget/loading_indicator.dart';
+import 'package:bealib/bean/widget/empty_state_widget.dart';
+import 'package:bealib/bean/widget/split_list_row.dart';
+import 'package:bealib/bean/widget/state_presentation.dart';
+import 'package:bealib/modules/search/plugin_search_module.dart';
+import 'package:bealib/pages/collect/collect_controller.dart';
+import 'package:bealib/pages/info/info_controller.dart';
+import 'package:bealib/pages/video/video_playback_args.dart';
+import 'package:bealib/plugins/anti_crawler_config.dart';
+import 'package:bealib/plugins/plugins.dart';
+import 'package:bealib/plugins/plugins_controller.dart';
+import 'package:bealib/services/logging/logger.dart';
+import 'package:bealib/services/plugin/captcha_verification_service.dart';
+import 'package:bealib/services/plugin/plugin_search_service.dart';
+import 'package:bealib/services/plugin/rule_speed_cache.dart';
+import 'package:bealib/services/storage/storage.dart';
+import 'package:bealib/services/plugin/rule_engine_models.dart'
+    show RuleCancelToken;
+import 'package:bealib/utils/device.dart';
+import 'package:bealib/utils/html_text.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+part 'source_alias_dialog.dart';
+part 'source_captcha_flow.dart';
+part 'source_sheet_view.dart';
+
+class SourceSheet extends StatefulWidget {
+  const SourceSheet({super.key, required this.infoController});
+
+  final InfoController infoController;
+
+  @override
+  State<SourceSheet> createState() => _SourceSheetState();
+}
+
+class _SourceSheetState extends State<SourceSheet> with BealibDialogOwner {
+  final CollectController _collectController = inject<CollectController>();
+  final PluginsController _pluginsController = inject<PluginsController>();
+  final Map<String, String> _sourceKeywords = {};
+  bool _userInteracted = false;
+
+  late final String _keyword;
+  late final PluginSearchService _searchService;
+  late final _SourceCaptchaFlow _captchaFlow;
+
+  @override
+  void initState() {
+    super.initState();
+    final item = widget.infoController.bangumiItem;
+    _keyword = item.nameCn.isEmpty ? item.name : item.nameCn;
+    _searchService = PluginSearchService(
+      infoController: widget.infoController,
+      pluginsController: _pluginsController,
+    );
+    _captchaFlow = _SourceCaptchaFlow(
+      onVerified: _showVerifiedResult,
+      onCancelled: (plugin) => _retry(plugin.name),
+    );
+    _searchService.queryAllSource(_keyword).then((_) => _maybeAutoPlayFastest());
+  }
+
+  @override
+  void dispose() {
+    _searchService.cancel();
+    _captchaFlow.dispose();
+    super.dispose();
+  }
+
+  /// 需求：详情页播放自动使用「速度最快」的规则，且播放失败时不做自动切换。
+  ///
+  /// 实现：进入播放源面板即并行检索所有规则，[RuleSpeedCache] 记录了每条规则
+  /// 的首包耗时；在检索全部结束、且用户没有主动操作时，自动选中最快规则的
+  /// 第一条结果并进入播放页，把规则选择权交还给用户（可返回重新选择）。
+  Future<void> _maybeAutoPlayFastest() async {
+    if (!mounted) return;
+    if (!GStorage.getSetting(SettingsKeys.autoSelectFastestRule)) return;
+    final String? fastest = RuleSpeedCache.instance.fastest(_keyword);
+    if (fastest == null) return;
+    // 留一个可见窗口，让用户看到排序结果，也避免误点被立刻覆盖。
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!mounted || _userInteracted) return;
+    for (final response in widget.infoController.pluginSearchResponseList) {
+      if (response.pluginName != fastest || response.data.isEmpty) continue;
+      BealibDialog.showToast(message: '已自动选择最快规则：$fastest');
+      await _openSearchItem(fastest, response.data.first, fromAuto: true);
+      return;
+    }
+  }
+
+  String _keywordFor(String name) => _sourceKeywords[name] ?? _keyword;
+
+  Plugin _pluginFor(String name) =>
+      _pluginsController.pluginList.firstWhere((plugin) => plugin.name == name);
+
+  void _querySource(String keyword, String pluginName) {
+    _userInteracted = true;
+    final trimmed = keyword.trim();
+    if (!mounted || trimmed.isEmpty) return;
+    setState(() => _sourceKeywords[pluginName] = trimmed);
+    _searchService.querySource(trimmed, pluginName);
+  }
+
+  void _retry(String name) => _querySource(_keywordFor(name), name);
+
+  void _showVerifiedResult(Plugin plugin, String pageHtml) {
+    if (!mounted) return;
+    if (_searchService.applyHarvestedSearchResult(plugin.name, pageHtml)) {
+      BealibDialog.showToast(message: '验证成功');
+      return;
+    }
+    _captchaFlow.showSuccess(
+      plugin.name,
+      onComplete: () => _retry(plugin.name),
+    );
+  }
+
+  Future<void> _openInBrowser(String name) async {
+    final plugin = _pluginFor(name);
+    final targetUrl = plugin.usesApiSearch
+        ? plugin.baseUrl
+        : plugin.searchURL.replaceAll(
+            '@keyword',
+            Uri.encodeQueryComponent(_keywordFor(name)),
+          );
+    try {
+      if (await launchUrl(Uri.parse(targetUrl),
+          mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } catch (error) {
+      BealibLogger().w('SourceSheet: failed to open browser', error: error);
+    }
+    if (mounted) BealibDialog.showToast(message: '无法打开浏览器，请稍后重试');
+  }
+
+  Future<void> _openSearchItem(
+    String name,
+    SearchItem searchItem, {
+    bool fromAuto = false,
+  }) async {
+    if (!fromAuto) _userInteracted = true;
+    if (dialogs.isRunning) return;
+    final plugin = _pluginFor(name);
+    await dialogs.run((task) async {
+      final cancelToken = RuleCancelToken();
+      final roads = await task.loading(
+        message: '正在获取播放列表',
+        barrierDismissible: isDesktop(),
+        onCancel: cancelToken.cancel,
+        action: () =>
+            plugin.queryChapterRoads(searchItem.src, cancelToken: cancelToken),
+      );
+      if (roads.isEmpty) throw ChapterErrorException(plugin.name);
+      task.withContext((context) => context.pushNamed(
+            '/video/',
+            arguments: OnlineVideoPlaybackArgs(
+              bangumiItem: widget.infoController.bangumiItem,
+              plugin: plugin,
+              title: decodeHtmlEntities(searchItem.name),
+              src: searchItem.src,
+              roads: roads,
+            ),
+          ));
+    }, onError: (error, stackTrace) {
+      BealibLogger().w('SourceSheet: failed to query playlist', error: error);
+      BealibDialog.showToast(message: '未能获取播放列表，请重试或选择其他结果');
+    });
+  }
+
+  void _showAliasPicker(String pluginName) {
+    if (widget.infoController.bangumiItem.alias.isEmpty) {
+      BealibDialog.showToast(message: '无可用别名，试试修改检索关键词');
+      return;
+    }
+    _showAliasPickerDialog(
+      sourceName: pluginName,
+      aliases: widget.infoController.bangumiItem.alias,
+      onAliasSelected: (alias) => _querySource(alias, pluginName),
+      onAliasesChanged: () => _collectController
+          .updateLocalCollect(widget.infoController.bangumiItem),
+    );
+  }
+
+  void _showCustomKeyword(String pluginName) => _showCustomKeywordDialog(
+        initialKeyword: _keywordFor(pluginName),
+        sourceName: pluginName,
+        onSubmit: (keyword) {
+          final item = widget.infoController.bangumiItem;
+          if (!item.alias.contains(keyword)) {
+            item.alias.add(keyword);
+            _collectController.updateLocalCollect(item);
+          }
+          _querySource(keyword, pluginName);
+        },
+      );
+
+  @override
+  Widget build(BuildContext context) => Observer(
+        builder: (context) {
+          // Snapshot observable values here; lazy list builders are not tracked.
+          final groupsByName = {
+            for (final plugin in _pluginsController.pluginList)
+              plugin.name: _SourceSearchGroup(
+                name: plugin.name,
+                keyword: _keywordFor(plugin.name),
+                status: widget.infoController.pluginSearchStatus[plugin.name] ??
+                    PluginSearchStatus.pending,
+                results: <SearchItem>[],
+              ),
+          };
+          final seenBySource = <String, Set<String>>{};
+          String? firstResultSource;
+          // Responses follow completion order; 先按完成顺序把结果灌入分组。
+          for (final response
+              in widget.infoController.pluginSearchResponseList) {
+            final group = groupsByName[response.pluginName];
+            if (group == null) continue;
+            final seen = seenBySource.putIfAbsent(group.name, () => <String>{});
+            for (final result in response.data) {
+              if (seen.add(result.src)) group.results.add(result);
+            }
+            if (group.hasResults) firstResultSource ??= group.name;
+          }
+          // 以测速结果重排：有结果且更快的规则排前面；未测速的保持配置顺序。
+          final ranked = RuleSpeedCache.instance.ranked(_keyword);
+          final order = <String, int>{
+            for (int i = 0; i < ranked.length; i++) ranked[i].pluginName: i,
+          };
+          final groups = groupsByName.values.toList()
+            ..sort((a, b) {
+              final ai = order[a.name] ?? 1 << 20;
+              final bi = order[b.name] ?? 1 << 20;
+              return ai.compareTo(bi);
+            });
+          firstResultSource =
+              RuleSpeedCache.instance.fastest(_keyword) ?? firstResultSource;
+          return _SourceSheetView(
+            keyword: _keyword,
+            groups: groups,
+            firstResultSource: firstResultSource,
+            onSourceSearch: _showCustomKeyword,
+            onSourceAliasSearch: _showAliasPicker,
+            onRetry: _retry,
+            onVerify: (name) =>
+                _captchaFlow.start(_pluginFor(name), _keywordFor(name)),
+            onOpenBrowser: _openInBrowser,
+            onPlay: _openSearchItem,
+            onClose: () => Navigator.of(context).pop(),
+          );
+        },
+      );
+}

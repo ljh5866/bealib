@@ -1,0 +1,65 @@
+import 'package:desktop_webview_window/src/user_script.dart';
+
+class ProxyConfiguration {
+  final String host;
+  final int port;
+
+  const ProxyConfiguration({required this.host, required this.port});
+
+  Map<String, dynamic> toMap() => {'host': host, 'port': port};
+}
+
+class CreateConfiguration {
+  final int windowWidth;
+  final int windowHeight;
+
+  /// Position of the top left point of the webview window
+  final int windowPosX;
+  final int windowPosY;
+
+  /// the title of window
+  final String title;
+
+  final String userDataFolderWindows;
+
+  final bool useWindowPositionAndSize;
+  final bool openMaximized;
+
+  final List<UserScript> userScripts;
+
+  final bool headless;
+
+  final ProxyConfiguration? proxy;
+
+  const CreateConfiguration({
+    this.windowWidth = 1280,
+    this.windowHeight = 720,
+    this.windowPosX = 0,
+    this.windowPosY = 0,
+    this.title = "",
+    this.userDataFolderWindows = 'webview_window_WebView2',
+    this.useWindowPositionAndSize = false,
+    this.openMaximized = false,
+    this.userScripts = const [],
+    this.headless = false,
+    this.proxy,
+  });
+
+  factory CreateConfiguration.platform() {
+    return CreateConfiguration();
+  }
+
+  Map toMap() => {
+        "windowWidth": windowWidth,
+        "windowHeight": windowHeight,
+        "windowPosX": windowPosX,
+        "windowPosY": windowPosY,
+        "title": title,
+        "userDataFolderWindows": userDataFolderWindows,
+        "useWindowPositionAndSize": useWindowPositionAndSize,
+        "openMaximized": openMaximized,
+        "userScripts": userScripts.map((e) => e.toMap()).toList(),
+        "headless": headless,
+        "proxy": proxy?.toMap(),
+      };
+}

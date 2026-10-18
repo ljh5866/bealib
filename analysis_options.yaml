@@ -1,0 +1,21 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - .cache/**
+    - .dart_tool/**
+    - build/**
+    - fastlane/**
+    - lib/bbcode/generated/**
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+    # 本地化的第三方依赖（codeload 拉取，含示例与测试，不参与本项目分析）
+    - vendor/**
+    # Android 构建期临时收起的桌面平台目录
+    - _platform_parked/**

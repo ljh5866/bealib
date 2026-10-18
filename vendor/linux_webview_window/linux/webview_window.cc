@@ -1,0 +1,477 @@
+//
+// Created by boyan on 10/21/21.
+//
+
+#include "webview_window.h"
+
+#include <utility>
+
+#if WEBKIT_MAJOR_VERSION < 2 || \
+    (WEBKIT_MAJOR_VERSION == 2 && WEBKIT_MINOR_VERSION < 40)
+#define WEBKIT_OLD_USED
+#endif
+
+struct UserData {
+    int64_t window_id;
+    FlMethodChannel* method_channel_;
+};
+
+// Helper struct for g_idle_add callbacks
+struct IdleCallbackData {
+    std::function<void()> callback;
+};
+
+static gboolean idle_callback_wrapper(gpointer user_data) {
+    auto* data = static_cast<IdleCallbackData*>(user_data);
+    data->callback();
+    delete data;
+    return G_SOURCE_REMOVE;
+}
+
+void handle_script_message(WebKitUserContentManager *manager, WebKitJavascriptResult *js_result, gpointer user_data) {
+  JSCValue *value = webkit_javascript_result_get_js_value(js_result);
+  if (jsc_value_is_string(value)) {
+      char *message = jsc_value_to_string(value);
+      UserData* r_user_data = static_cast<UserData*>(user_data);
+      int64_t window_id = r_user_data->window_id;
+      FlMethodChannel* method_channel_ = r_user_data->method_channel_;
+      
+      auto* args = fl_value_new_map();
+      fl_value_set(args, fl_value_new_string("id"), fl_value_new_int(window_id));
+      fl_value_set(args, fl_value_new_string("message"), fl_value_new_string(message));
+      
+      fl_method_channel_invoke_method(FL_METHOD_CHANNEL(method_channel_),
+                                      "onJavascriptWebMessageReceived", args, nullptr,
+                                      nullptr, nullptr);
+      fl_value_unref(args);
+      
+      g_free(message);
+  }
+}
+
+void get_cookies_callback(WebKitCookieManager *manager, GAsyncResult *res,
+                          gpointer user_data) {
+  CookieData *data = (CookieData *)user_data;
+  GError *error = NULL;
+
+  GList *cookies =
+      webkit_cookie_manager_get_cookies_finish(manager, res, &error);
+  if (error != NULL) {
+    g_print("Error getting cookies: %s\n", error->message);
+    g_error_free(error);
+    data->cookies = NULL;
+  } else {
+    data->cookies = cookies;
+  }
+
+  g_main_loop_quit(data->loop);
+}
+
+GList *get_cookies_sync(WebKitWebView *web_view) {
+  WebKitCookieManager *cookie_manager;
+  GMainLoop *loop;
+  CookieData data = {0};
+
+  cookie_manager = webkit_web_context_get_cookie_manager(
+      webkit_web_view_get_context(web_view));
+  loop = g_main_loop_new(NULL, FALSE);
+  data.loop = loop;
+
+  const gchar *uri = webkit_web_view_get_uri(web_view);
+
+  // Start the asynchronous operation
+  webkit_cookie_manager_get_cookies(cookie_manager, uri, NULL,
+                                    (GAsyncReadyCallback)get_cookies_callback,
+                                    &data);
+
+  // Run the main loop until the callback is called
+  g_main_loop_run(loop);
+
+  g_main_loop_unref(loop);
+
+  return data.cookies;
+}
+
+namespace {
+
+// Ingore all cerficate error
+gboolean on_load_failed_with_tls_errors(WebKitWebView *web_view,
+                                        char *failing_uri,
+                                        GTlsCertificate *certificate,
+                                        GTlsCertificateFlags errors,
+                                        gpointer user_data) {
+  return TRUE;
+}
+
+GtkWidget *on_create(WebKitWebView *web_view,
+                     WebKitNavigationAction *navigation_action,
+                     gpointer user_data) {
+  return GTK_WIDGET(web_view);
+}
+
+void on_load_changed(WebKitWebView *web_view, WebKitLoadEvent load_event,
+                     gpointer user_data) {
+  auto *window = static_cast<WebviewWindow *>(user_data);
+  window->OnLoadChanged(load_event);
+}
+
+gboolean decide_policy_cb(WebKitWebView *web_view,
+                          WebKitPolicyDecision *decision,
+                          WebKitPolicyDecisionType type, gpointer user_data) {
+  auto *window = static_cast<WebviewWindow *>(user_data);
+  return window->DecidePolicy(decision, type);
+}
+
+}  // namespace
+
+WebviewWindow::WebviewWindow(FlMethodChannel *method_channel, int64_t window_id,
+                             std::function<void()> on_close_callback,
+                             const std::string &title, int width, int height,
+                             bool headless,
+                             const std::vector<UserScript> &user_scripts,
+                             const char* proxy_url)
+    : method_channel_(method_channel),
+      window_id_(window_id),
+      on_close_callback_(std::move(on_close_callback)),
+      default_user_agent_() {
+  g_object_ref(method_channel_);
+
+  window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  g_signal_connect(G_OBJECT(window_), "destroy",
+                   G_CALLBACK(+[](GtkWidget *, gpointer arg) {
+                     auto *window = static_cast<WebviewWindow *>(arg);
+                     
+                     // Prevent UAF if window is closed by user.
+                     bool closing_programmatically = window->closing_programmatically_;
+                     int64_t window_id = window->window_id_;
+                     FlMethodChannel* channel = window->method_channel_;
+                     g_object_ref(channel);
+                     
+                     if (window->on_close_callback_) {
+                       window->on_close_callback_();
+                     }
+                     
+                     if (!closing_programmatically) {                     
+                       auto* idle_data = new IdleCallbackData{([window_id, channel]() {
+                           auto *args = fl_value_new_map();
+                           fl_value_set(args, fl_value_new_string("id"), fl_value_new_int(window_id));
+                           fl_method_channel_invoke_method(
+                               FL_METHOD_CHANNEL(channel),
+                               "onWindowClose", args, nullptr, nullptr, nullptr);
+                           fl_value_unref(args);
+                           g_object_unref(channel);
+                       })};
+                       g_idle_add(idle_callback_wrapper, idle_data);
+                     } else {
+                       g_object_unref(channel);
+                     }
+                   }),
+                   this);
+  gtk_window_set_title(GTK_WINDOW(window_), title.c_str());
+  gtk_window_set_default_size(GTK_WINDOW(window_), width, height);
+  gtk_window_set_position(GTK_WINDOW(window_), GTK_WIN_POS_CENTER);
+
+  // initial web_view
+  auto *manager = webkit_user_content_manager_new();
+  for (const auto &script : user_scripts) {
+    // g_print("checkpoint: inject time: %d\n", script.injection_time);
+    // g_print("checkPoint: inject all iframe: %d\n", script.for_all_frames);
+    webkit_user_content_manager_add_script(
+        manager, webkit_user_script_new(
+                     script.source.c_str(),
+                     script.for_all_frames
+                         ? WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES
+                         : WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                     script.injection_time == 0
+                         ? WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START
+                         : WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END,
+                     nullptr, nullptr));
+  }
+
+  // Register callback for window.webkit.messageHandlers.msgToNative.postMessage(value)
+  UserData* user_data = new UserData{window_id, method_channel_};
+  g_signal_connect (manager, "script-message-received::msgToNative",
+                  G_CALLBACK (handle_script_message), user_data);
+  webkit_user_content_manager_register_script_message_handler (manager, "msgToNative");
+
+  // Configure proxy settings
+  auto *context = webkit_web_context_get_default();
+  auto *data_manager = webkit_web_context_get_website_data_manager(context);
+  if (proxy_url != nullptr) {
+    auto *proxy_settings = webkit_network_proxy_settings_new(proxy_url, nullptr);
+    webkit_website_data_manager_set_network_proxy_settings(
+        data_manager, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, proxy_settings);
+  } else {
+    webkit_website_data_manager_set_network_proxy_settings(
+        data_manager, WEBKIT_NETWORK_PROXY_MODE_DEFAULT, nullptr);
+  }
+
+  webview_ = GTK_WIDGET(g_object_new(WEBKIT_TYPE_WEB_VIEW,
+      "web-context", context,
+      "user-content-manager", manager,
+      nullptr));
+  g_signal_connect(G_OBJECT(webview_), "load-failed-with-tls-errors",
+                   G_CALLBACK(on_load_failed_with_tls_errors), this);
+  g_signal_connect(G_OBJECT(webview_), "create", G_CALLBACK(on_create), this);
+  g_signal_connect(G_OBJECT(webview_), "load-changed",
+                   G_CALLBACK(on_load_changed), this);
+  g_signal_connect(G_OBJECT(webview_), "decide-policy",
+                   G_CALLBACK(decide_policy_cb), this);
+
+  auto settings = webkit_web_view_get_settings(WEBKIT_WEB_VIEW(webview_));
+  webkit_settings_set_javascript_can_open_windows_automatically(settings, true);
+  default_user_agent_ = webkit_settings_get_user_agent(settings);
+  gtk_container_add(GTK_CONTAINER(window_), webview_);
+
+  if (!headless) {
+    gtk_widget_show_all(GTK_WIDGET(window_));
+    gtk_widget_grab_focus(GTK_WIDGET(webview_));
+  }
+}
+
+WebviewWindow::~WebviewWindow() {
+  g_object_unref(method_channel_);
+}
+
+void WebviewWindow::Navigate(const char *url) {
+  g_print("[Native] Navigate called for window %ld, url: %s\n", window_id_, url);
+  
+  // Copy url string for idle callback
+  std::string url_str(url);
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview, url_str]() {
+      g_print("[Native] Executing Navigate on main thread\n");
+      webkit_web_view_load_uri(WEBKIT_WEB_VIEW(webview), url_str.c_str());
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::RunJavaScriptWhenContentReady(const char *java_script) {
+  std::string script_str(java_script);
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview, script_str]() {
+      auto *manager =
+          webkit_web_view_get_user_content_manager(WEBKIT_WEB_VIEW(webview));
+      webkit_user_content_manager_add_script(
+          manager,
+          webkit_user_script_new(script_str.c_str(), WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                                 WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+                                 nullptr, nullptr));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::SetApplicationNameForUserAgent(
+    const std::string &app_name) {
+  auto *setting = webkit_web_view_get_settings(WEBKIT_WEB_VIEW(webview_));
+  webkit_settings_set_user_agent(setting,
+                                 (default_user_agent_ + app_name).c_str());
+}
+
+void WebviewWindow::Close() { 
+  closing_programmatically_ = true;
+  
+  GtkWidget* window = window_;
+  
+  auto* idle_data = new IdleCallbackData{([window]() {
+      gtk_widget_destroy(GTK_WIDGET(window));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::OnLoadChanged(WebKitLoadEvent load_event) {
+  {
+    auto can_go_back = webkit_web_view_can_go_back(WEBKIT_WEB_VIEW(webview_));
+    auto can_go_forward =
+        webkit_web_view_can_go_forward(WEBKIT_WEB_VIEW(webview_));
+    
+    auto *args = fl_value_new_map();
+    fl_value_set(args, fl_value_new_string("id"), fl_value_new_int(window_id_));
+    fl_value_set(args, fl_value_new_string("canGoBack"),
+                 fl_value_new_bool(can_go_back));
+    fl_value_set(args, fl_value_new_string("canGoForward"),
+                 fl_value_new_bool(can_go_forward));
+    
+    fl_method_channel_invoke_method(FL_METHOD_CHANNEL(method_channel_),
+                                    "onHistoryChanged", args, nullptr, nullptr,
+                                    nullptr);
+    fl_value_unref(args);
+  }
+
+  switch (load_event) {
+    case WEBKIT_LOAD_STARTED: {
+      auto *args = fl_value_new_map();
+      fl_value_set(args, fl_value_new_string("id"),
+                   fl_value_new_int(window_id_));
+      
+      fl_method_channel_invoke_method(FL_METHOD_CHANNEL(method_channel_),
+                                      "onNavigationStarted", args, nullptr,
+                                      nullptr, nullptr);
+      fl_value_unref(args);
+      break;
+    }
+    case WEBKIT_LOAD_FINISHED: {
+      auto *args = fl_value_new_map();
+      fl_value_set(args, fl_value_new_string("id"),
+                   fl_value_new_int(window_id_));
+      
+      fl_method_channel_invoke_method(FL_METHOD_CHANNEL(method_channel_),
+                                      "onNavigationCompleted", args, nullptr,
+                                      nullptr, nullptr);
+      fl_value_unref(args);
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+void WebviewWindow::GoForward() {
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview]() {
+      webkit_web_view_go_forward(WEBKIT_WEB_VIEW(webview));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::GoBack() {
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview]() {
+      webkit_web_view_go_back(WEBKIT_WEB_VIEW(webview));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::Reload() {
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview]() {
+      webkit_web_view_reload(WEBKIT_WEB_VIEW(webview));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+void WebviewWindow::StopLoading() {
+  GtkWidget* webview = webview_;
+  
+  auto* idle_data = new IdleCallbackData{([webview]() {
+      webkit_web_view_stop_loading(WEBKIT_WEB_VIEW(webview));
+  })};
+  g_idle_add(idle_callback_wrapper, idle_data);
+}
+
+FlValue *WebviewWindow::GetAllCookies() {
+  GList *cookies = get_cookies_sync(WEBKIT_WEB_VIEW(webview_));
+
+  g_autoptr(FlValue) fl_cookie_list = fl_value_new_list();
+
+  FlValue* cookie_list = fl_value_ref(fl_cookie_list);
+
+  for (GList *l = cookies; l; l = l->next) {
+    SoupCookie *cookie = (SoupCookie *)l->data;
+    g_autoptr(FlValue) cookie_map = fl_value_new_map();
+
+    fl_value_set_string_take(cookie_map, "name",
+                             fl_value_new_string(soup_cookie_get_name(cookie)));
+    fl_value_set_string_take(
+        cookie_map, "value",
+        fl_value_new_string(soup_cookie_get_value(cookie)));
+    fl_value_set_string_take(
+        cookie_map, "domain",
+        fl_value_new_string(soup_cookie_get_domain(cookie)));
+    fl_value_set_string_take(cookie_map, "path",
+                             fl_value_new_string(soup_cookie_get_path(cookie)));
+
+    gdouble expires = g_date_time_get_seconds(soup_cookie_get_expires(cookie));
+
+    if (expires >= 0) {
+      fl_value_set_string_take(cookie_map, "expires",
+                               fl_value_new_float(expires));
+    } else {
+      fl_value_set_string_take(cookie_map, "expires", fl_value_new_null());
+    }
+
+    fl_value_set_string_take(
+        cookie_map, "httpOnly",
+        fl_value_new_bool(soup_cookie_get_http_only(cookie)));
+    fl_value_set_string_take(cookie_map, "secure",
+                             fl_value_new_bool(soup_cookie_get_secure(cookie)));
+    fl_value_set_string_take(cookie_map, "sessionOnly",
+                             fl_value_new_bool(false));
+
+    fl_value_append(cookie_list, cookie_map);
+    soup_cookie_free(cookie);
+  }
+
+  g_free(cookies);
+
+  return cookie_list;
+}
+
+gboolean WebviewWindow::DecidePolicy(WebKitPolicyDecision *decision,
+                                     WebKitPolicyDecisionType type) {
+  if (type == WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
+    auto *navigation_decision = WEBKIT_NAVIGATION_POLICY_DECISION(decision);
+    auto *navigation_action =
+        webkit_navigation_policy_decision_get_navigation_action(
+            navigation_decision);
+    auto *request = webkit_navigation_action_get_request(navigation_action);
+    auto *uri = webkit_uri_request_get_uri(request);
+    
+    auto *args = fl_value_new_map();
+    fl_value_set(args, fl_value_new_string("id"), fl_value_new_int(window_id_));
+    fl_value_set(args, fl_value_new_string("url"), fl_value_new_string(uri));
+    
+    fl_method_channel_invoke_method(FL_METHOD_CHANNEL(method_channel_),
+                                    "onUrlRequested", args, nullptr, nullptr,
+                                    nullptr);
+    fl_value_unref(args);
+  }
+  return false;
+}
+
+void WebviewWindow::EvaluateJavaScript(const char *java_script,
+                                       FlMethodCall *call) {
+#ifdef WEBKIT_OLD_USED
+  webkit_web_view_run_javascript(
+#else
+  webkit_web_view_evaluate_javascript(
+#endif
+      WEBKIT_WEB_VIEW(webview_), java_script,
+#ifndef WEBKIT_OLD_USED
+      -1, nullptr, nullptr,
+#endif
+      nullptr,
+      [](GObject *object, GAsyncResult *result, gpointer user_data) {
+        auto *call = static_cast<FlMethodCall *>(user_data);
+        GError *error = nullptr;
+        auto *js_result =
+#ifdef WEBKIT_OLD_USED
+            webkit_web_view_run_javascript_finish(
+#else
+            webkit_web_view_evaluate_javascript_finish(
+#endif
+                WEBKIT_WEB_VIEW(object), result, &error);
+        if (!js_result) {
+          fl_method_call_respond_error(call, "failed to evaluate javascript.",
+                                       error->message, nullptr, nullptr);
+          g_error_free(error);
+        } else {
+          auto *js_value = jsc_value_to_json(
+#ifdef WEBKIT_OLD_USED
+              webkit_javascript_result_get_js_value
+#endif
+              (js_result),
+              0);
+          fl_method_call_respond_success(
+              call, js_value ? fl_value_new_string(js_value) : nullptr,
+              nullptr);
+        }
+        g_object_unref(call);
+      },
+      g_object_ref(call));
+}

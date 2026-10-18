@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Bealib (debug, Skia)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--no-enable-impeller"
+      ]
+    },
+    {
+      "name": "Bealib (debug, Skia, local defines)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--no-enable-impeller",
+        "--dart-define-from-file=.bealib_build_defines.env"
+      ]
+    },
+    {
+      "name": "Bealib (debug, Impeller)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--enable-impeller"
+      ]
+    },
+    {
+      "name": "Bealib (debug, Impeller, local defines)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--enable-impeller",
+        "--dart-define-from-file=.bealib_build_defines.env"
+      ]
+    }
+  ]
+}
