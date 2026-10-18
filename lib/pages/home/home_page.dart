@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:bealib/modules/bangumi/bangumi_item.dart';
@@ -25,6 +27,10 @@ class _HomePageState extends State<HomePage> {
   final List<BangumiItem> _items = <BangumiItem>[];
   final Set<int> _itemIds = <int>{};
   final ScrollController _scrollController = ScrollController();
+  final Random _random = Random();
+
+  /// 下拉刷新时在 0–7 页范围内随机换一页，让推荐内容变化。
+  static const int _refreshPageSpan = 8;
 
   bool _loading = true;
   bool _loadingMore = false;
@@ -99,8 +105,37 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _load() async {
+  bool _sameIds(List<BangumiItem> items, Set<int> ids) {
+    if (items.length != ids.length) return false;
+    for (final BangumiItem item in items) {
+      if (!ids.contains(item.id)) return false;
+    }
+    return true;
+  }
+
+  int _currentStartOffset() {
+    final int start = _offset - _pageSize;
+    return start < 0 ? 0 : start;
+  }
+
+  int _nextRefreshOffset() {
+    final int span = _refreshPageSpan * _pageSize;
+    final int current = _currentStartOffset();
+    int next = current;
+    for (int i = 0; i < 6 && next == current; i++) {
+      next = _random.nextInt(_refreshPageSpan) * _pageSize;
+    }
+    if (next == current) {
+      next = (current + _pageSize) % span;
+    }
+    return next;
+  }
+
+  /// [startOffset] 为 0 表示首屏/回到第一页；下拉刷新会随机换一个起始页。
+  Future<void> _load({int startOffset = 0}) async {
     final int generation = ++_generation;
+    final Set<int>? previousIds =
+        _items.isEmpty ? null : _items.map((item) => item.id).toSet();
     if (mounted) {
       setState(() {
         _loading = true;
@@ -109,10 +144,9 @@ class _HomePageState extends State<HomePage> {
         _hasMore = true;
       });
     }
-    _offset = 0;
 
     // 首屏先用上次成功的缓存秒开，再走网络刷新（镜像延迟抖动大）。
-    if (_items.isEmpty) {
+    if (_items.isEmpty && startOffset == 0) {
       final cached = await BangumiApi.getBangumiMirrorPopularSubjects(
         limit: _pageSize,
         offset: 0,
@@ -129,21 +163,54 @@ class _HomePageState extends State<HomePage> {
     }
 
     List<BangumiItem> result = const <BangumiItem>[];
+    int effectiveOffset = startOffset;
     try {
-      result = await _fetch(limit: _pageSize, offset: 0);
+      result = await _fetch(limit: _pageSize, offset: startOffset);
+      // 刷新到了靠后的页但内容不足（或空），退回第一页，避免刷新后列表变少。
+      if (startOffset != 0 && result.length < _pageSize) {
+        final List<BangumiItem> firstPage =
+            await _fetch(limit: _pageSize, offset: 0);
+        if (firstPage.isNotEmpty) {
+          result = firstPage;
+          effectiveOffset = 0;
+        }
+      }
     } catch (_) {
       // 网络失败时保留已有内容（缓存或上一次列表）。
+    }
+
+    // 下拉刷新时如果拿到的还是同一批内容，换几个起始页再试，确保推荐有变化。
+    if (startOffset != 0 && previousIds != null && result.length >= _pageSize) {
+      for (int attempt = 0;
+          attempt < 3 && _sameIds(result, previousIds);
+          attempt++) {
+        final int alt = _random.nextInt(_refreshPageSpan) * _pageSize;
+        if (alt == effectiveOffset) continue;
+        try {
+          final List<BangumiItem> altResult =
+              await _fetch(limit: _pageSize, offset: alt);
+          if (altResult.length >= _pageSize) {
+            result = altResult;
+            effectiveOffset = alt;
+          }
+        } catch (_) {
+          // 忽略单次换页失败。
+        }
+      }
     }
     if (!mounted || generation != _generation) return;
     setState(() {
       if (result.isNotEmpty) {
         _replaceItems(result);
-        _offset = _pageSize;
+        _offset = effectiveOffset + _pageSize;
         _hasMore = result.length >= _pageSize;
       }
       _loading = false;
     });
   }
+
+  /// 下拉刷新：随机换一页推荐内容。
+  Future<void> _refresh() => _load(startOffset: _nextRefreshOffset());
 
   Future<void> _loadMore() async {
     if (_loading || _loadingMore || !_hasMore) return;
@@ -204,7 +271,7 @@ class _HomePageState extends State<HomePage> {
     final double childAspectRatio = gridItemWidth / cardHeight;
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _refresh,
       color: scheme.primary,
       child: CustomScrollView(
         controller: _scrollController,
