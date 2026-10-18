@@ -77,7 +77,7 @@ class _SourceSheetState extends State<SourceSheet> with BealibDialogOwner {
     super.dispose();
   }
 
-  /// 需求：详情页播放自动使用「速度最快」的规则，且播放失败时不做自动切换。
+  /// 需求：详情页播放自动使用「速度最快」的规则；播放失败时自动切换其它规则。
   ///
   /// 实现：进入播放源面板即并行检索所有规则，[RuleSpeedCache] 记录了每条规则
   /// 的首包耗时；在检索全部结束、且用户没有主动操作时，自动选中最快规则的

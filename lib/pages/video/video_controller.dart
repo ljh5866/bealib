@@ -703,7 +703,8 @@ abstract class _VideoPageController with Store implements Disposable {
         );
         unawaited(_loadPlaybackDanmaku(playerController, params, session));
       } else if (session.isActive) {
-        _playbackSessions.cancel();
+        // 播放器初始化失败：进入错误态，由视频页自动切换规则。
+        _failLoading('播放器加载失败');
       }
     } on VideoSourceTimeoutException {
       if (session.isStale) {

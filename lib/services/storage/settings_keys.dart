@@ -228,7 +228,7 @@ class SettingsKeys {
     group: SettingGroup.theme,
   );
   /// 播放时自动选择速度最快的规则（详情页进入播放源面板时生效）。
-  /// 注意：这是「首次选择」策略；播放失败不会自动切换到其它规则。
+  /// 注意：这是「首次选择」策略；播放失败会自动切换到其它可用规则。
   static const autoSelectFastestRule = SettingKey<bool>(
     'autoSelectFastestRule',
     true,

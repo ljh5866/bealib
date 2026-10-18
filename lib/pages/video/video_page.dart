@@ -9,6 +9,7 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
 import 'package:window_manager/window_manager.dart';
 
 import 'package:bealib/bean/appbar/drag_to_move_bar.dart' as dtb;
+import 'package:bealib/bean/dialog/dialog_helper.dart';
 import 'package:bealib/bean/dialog/adaptive_bottom_sheet.dart';
 import 'package:bealib/bean/widget/embedded_native_control_area.dart';
 import 'package:bealib/bean/widget/loading_indicator.dart';
@@ -25,6 +26,9 @@ import 'package:bealib/pages/video/widgets/bealib_rule_bar.dart';
 import 'package:bealib/pages/video/widgets/bealib_video_info_panel.dart';
 import 'package:bealib/plugins/plugins_controller.dart';
 import 'package:bealib/request/apis/bangumi_api.dart';
+import 'package:bealib/modules/roads/road_module.dart';
+import 'package:bealib/pages/player/controller/player_playback_controller.dart';
+import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/plugin/rule_resolver.dart';
 import 'package:bealib/utils/html_text.dart';
 import 'package:bealib/pages/video/video_controller.dart';
@@ -78,6 +82,12 @@ class _VideoPageState extends State<VideoPage>
 
   String? _pendingResolutionError;
 
+  // 播放失败自动切换规则：同一番剧内记录已尝试过的规则，避免来回循环。
+  static final Set<String> _autoSwitchedPlugins = <String>{};
+  static int? _autoSwitchBangumiId;
+  bool _autoSwitchingRule = false;
+  String? _handledPlaybackError;
+
   late final bool disableAnimations;
 
   StreamSubscription<SyncPlayChatMessage>? _syncChatSubscription;
@@ -90,6 +100,12 @@ class _VideoPageState extends State<VideoPage>
   void initState() {
     super.initState();
     videoPageController.applyPlaybackArgs(widget.args);
+    final int bangumiId = videoPageController.bangumiItem.id;
+    if (_autoSwitchBangumiId != bangumiId) {
+      _autoSwitchBangumiId = bangumiId;
+      _autoSwitchedPlugins.clear();
+    }
+    setActionablePlayerErrorHandler(this, _handlePlayerStreamError);
     windowManager.addListener(this);
 
     tabController = TabController(length: 2, vsync: this);
@@ -151,6 +167,73 @@ class _VideoPageState extends State<VideoPage>
     _initOnlineMode();
   }
 
+  void _handlePlayerStreamError(String message) {
+    if (!mounted) return;
+    _scheduleAutoSwitch(message);
+  }
+
+  void _scheduleAutoSwitch(String reason) {
+    if (_handledPlaybackError == reason) return;
+    _handledPlaybackError = reason;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _autoSwitchRule(reason);
+    });
+  }
+
+  /// 当前规则播放失败时，按检索速度自动尝试其它有结果的规则。
+  Future<void> _autoSwitchRule(String reason) async {
+    if (_autoSwitchingRule) return;
+    final List<RuleProbe> candidates = RuleResolver.lastProbes
+        .where((probe) =>
+            probe.hasResult &&
+            !_autoSwitchedPlugins.contains(probe.plugin.name))
+        .toList();
+    if (candidates.isEmpty) return;
+    _autoSwitchingRule = true;
+    try {
+      for (final RuleProbe probe in candidates) {
+        if (!mounted) return;
+        _autoSwitchedPlugins.add(probe.plugin.name);
+        try {
+          if (!probe.hasResult) {
+            await RuleResolver.ensureProbe(probe);
+          }
+          if (!probe.hasResult || !mounted) continue;
+          final List<Road> roads = await RuleResolver.loadRoads(probe);
+          if (!mounted || roads.isEmpty) continue;
+          final int currentEpisode =
+              videoPageController.selectedEpisode.episode;
+          final int initialEpisode =
+              currentEpisode > roads.first.data.length ? 1 : currentEpisode;
+          BealibDialog.showToast(
+            message: '「${videoPageController.currentPlugin.name}」播放失败，'
+                '正在切换到「${probe.plugin.name}」',
+          );
+          context.popAndPushNamed(
+            '/video/',
+            arguments: OnlineVideoPlaybackArgs(
+              bangumiItem: videoPageController.bangumiItem,
+              plugin: probe.plugin,
+              title: decodeHtmlEntities(probe.item!.name),
+              src: probe.item!.src,
+              roads: roads,
+              initialRoad: 0,
+              initialEpisode: initialEpisode,
+            ),
+          );
+          return;
+        } catch (error) {
+          BealibLogger().w(
+            'VideoPage: auto switch rule failed (${probe.plugin.name})',
+            error: error,
+          );
+        }
+      }
+    } finally {
+      _autoSwitchingRule = false;
+    }
+  }
+
   Future<void> _resolvePendingOnline() async {
     setState(() => _pendingResolutionError = null);
     // 本地搜索的结果可能只有基础字段（英文标题、无别名），先按 ID 拉取详情，
@@ -188,18 +271,42 @@ class _VideoPageState extends State<VideoPage>
         });
         return;
       }
-      final roads = await RuleResolver.loadRoads(fastest);
-      if (!mounted) return;
-      if (roads.isEmpty) {
+      // 按检索速度依次尝试有结果的规则：最快规则拿不到播放列表时自动切换到下一条。
+      RuleProbe? chosen;
+      List<Road> roads = const <Road>[];
+      for (final RuleProbe probe in RuleResolver.lastProbes) {
+        if (!probe.hasResult) continue;
+        try {
+          final List<Road> candidateRoads =
+              await RuleResolver.loadRoads(probe);
+          if (!mounted) return;
+          if (candidateRoads.isNotEmpty) {
+            chosen = probe;
+            roads = candidateRoads;
+            break;
+          }
+        } catch (error) {
+          BealibLogger().w(
+            'VideoPage: rule ${probe.plugin.name} failed to load roads',
+            error: error,
+          );
+        }
+      }
+      if (chosen == null || roads.isEmpty) {
         setState(() {
-          _pendingResolutionError = '最快规则未能获取播放列表，可在「选集」里手动切换规则重试';
+          _pendingResolutionError = '规则均未能获取播放列表，可在「选集」里手动切换规则重试';
         });
         return;
       }
+      if (chosen.plugin.name != fastest.plugin.name) {
+        BealibDialog.showToast(
+          message: '最快规则未能获取播放列表，已自动切换到「${chosen.plugin.name}」',
+        );
+      }
       videoPageController.applyResolvedOnlineSource(
-        plugin: fastest.plugin,
-        title: decodeHtmlEntities(fastest.item!.name),
-        src: fastest.item!.src,
+        plugin: chosen.plugin,
+        title: decodeHtmlEntities(chosen.item!.name),
+        src: chosen.item!.src,
         roads: roads,
       );
       _initOnlineMode();
@@ -393,6 +500,7 @@ class _VideoPageState extends State<VideoPage>
       _syncChatSubscription?.cancel();
     } catch (_) {}
     try {
+      setActionablePlayerErrorHandler(this, null);
       _logSubscription?.cancel();
     } catch (_) {}
     _pipModeListener();
@@ -544,6 +652,7 @@ class _VideoPageState extends State<VideoPage>
                   child: Observer(builder: (context) {
                     final errorMessage = videoPageController.errorMessage;
                     if (errorMessage != null) {
+                      _scheduleAutoSwitch(errorMessage);
                       return MediaErrorWidget(
                         title: '暂时无法播放',
                         errMsg: errorMessage,

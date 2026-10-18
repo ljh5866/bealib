@@ -26,8 +26,24 @@ import 'package:bealib/services/platform/platform_environment_service.dart';
 
 part 'player_playback_controller.g.dart';
 
-class PlayerPlaybackController = _PlayerPlaybackController
-    with _$PlayerPlaybackController;
+class PlayerPlaybackController = _PlayerPlaybackController with _$PlayerPlaybackController;
+
+/// 播放器流错误（例如视频地址失效）时通知视频页，用于自动切换规则。
+void Function(String message)? _actionableErrorHandler;
+Object? _actionableErrorOwner;
+
+void setActionablePlayerErrorHandler(Object owner, void Function(String message)? handler) {
+  if (handler == null) {
+    if (identical(_actionableErrorOwner, owner)) {
+      _actionableErrorHandler = null;
+      _actionableErrorOwner = null;
+    }
+    return;
+  }
+  _actionableErrorOwner = owner;
+  _actionableErrorHandler = handler;
+}
+
 
 final class _OwnedPlayer {
   _OwnedPlayer(this.player);
@@ -429,6 +445,7 @@ abstract class _PlayerPlaybackController with Store {
             isBuffering: playerBuffering,
           );
           if (actionableMessage != null) {
+            _actionableErrorHandler?.call(actionableMessage);
             BealibDialog.showToast(
                 message: actionableMessage, showActionButton: true);
           } else if (showPlayerError) {

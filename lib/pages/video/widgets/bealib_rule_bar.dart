@@ -10,7 +10,7 @@ import 'package:bealib/utils/html_text.dart';
 
 /// 播放页「选集」Tab 顶部的规则切换条。
 ///
-/// 规则只允许用户手动切换（不做失败自动切换）；切换后会重新解析该规则的
+/// 规则支持手动切换，播放失败时视频页也会自动切换其它规则；切换后会重新解析该规则的
 /// 播放线路，并以新规则重新进入播放页。
 class BealibRuleBar extends StatefulWidget {
   const BealibRuleBar({super.key, required this.videoPageController});

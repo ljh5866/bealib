@@ -352,7 +352,7 @@ class _PlayerSettingsPageState extends State<PlayerSettingsPage> {
                   setState(() {});
                 },
                 title: Text('自动选择最快规则'),
-                description: Text('进入播放时自动使用检索最快的规则；播放失败不会自动切换'),
+                description: Text('进入播放时自动使用检索最快的规则；加载失败会自动切换其它规则'),
                 initialValue: autoSelectFastestRule,
               ),
               if (Platform.isAndroid)
