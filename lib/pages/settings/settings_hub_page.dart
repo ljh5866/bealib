@@ -86,7 +86,7 @@ class SettingsHubPage extends StatelessWidget {
             _SettingsTileData(
               icon: Icons.update_rounded,
               label: '更新设置',
-              description: '应用更新与规则更新',
+              description: '检查并安装最新版本',
               route: '/settings/update',
             ),
             _SettingsTileData(

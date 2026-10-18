@@ -10,6 +10,7 @@ import 'package:bealib/request/config/api_endpoints.dart';
 import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/update/update_download_source.dart';
 import 'package:bealib/services/update/update_downloader.dart';
+import 'package:bealib/services/update/update_policy.dart';
 import 'package:bealib/services/storage/storage.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -44,6 +45,8 @@ class UpdateInfo {
   final InstallationType? installationType;
   final List<InstallationType> availableInstallationTypes;
   final List<dynamic> assets;
+  final bool forceUpdate;
+  final String forceReason;
 
   UpdateInfo({
     required this.version,
@@ -54,6 +57,8 @@ class UpdateInfo {
     this.installationType,
     this.availableInstallationTypes = const [],
     this.assets = const [],
+    this.forceUpdate = false,
+    this.forceReason = '',
   });
   InstallationType get recommendedInstallationType {
     if (availableInstallationTypes.isNotEmpty) {
@@ -129,6 +134,9 @@ class AutoUpdater {
   /// 仓库还没有发布任何 Release（GitHub 返回 404/403）。
   bool _noPublishedRelease = false;
 
+  /// 最近一次拉取到的版本策略（用于强制更新/停用判断）。
+  UpdatePolicy? lastPolicy;
+
   List<InstallationType> _detectAvailableInstallationTypes() {
     if (Platform.isWindows) {
       return [InstallationType.windowsMsix, InstallationType.windowsPortable];
@@ -155,6 +163,17 @@ class AutoUpdater {
       final remoteVersion = data['tag_name'] as String;
       final currentVersion = ApiEndpoints.version;
 
+      UpdatePolicy? policy;
+      try {
+        policy = await UpdatePolicyService.instance.fetch();
+      } catch (error) {
+        BealibLogger().w('Update: load policy failed', error: error);
+      }
+      lastPolicy = policy;
+      final forceUpdate = policy?.blocks(currentVersion) ?? false;
+      final forceReason =
+          forceUpdate ? (policy?.reasonFor(currentVersion) ?? '') : '';
+
       if (needUpdate(currentVersion, remoteVersion)) {
         final availableTypes = _detectAvailableInstallationTypes();
 
@@ -167,6 +186,8 @@ class AutoUpdater {
           installationType: availableTypes.first,
           availableInstallationTypes: availableTypes,
           assets: data['assets'] ?? [],
+          forceUpdate: forceUpdate,
+          forceReason: forceReason,
         );
       }
 
@@ -212,6 +233,8 @@ class AutoUpdater {
       final updateInfo = await checkForUpdates();
       if (updateInfo != null) {
         _showUpdateDialog(updateInfo, isAutoCheck: true);
+      } else if (lastPolicy?.blocks(ApiEndpoints.version) ?? false) {
+        await _showForceBlockedDialog();
       }
     } catch (e) {
       BealibLogger().w('Update: auto check for updates failed', error: e);
@@ -223,6 +246,8 @@ class AutoUpdater {
       final updateInfo = await checkForUpdates();
       if (updateInfo != null) {
         _showUpdateDialog(updateInfo, isAutoCheck: false);
+      } else if (lastPolicy?.blocks(ApiEndpoints.version) ?? false) {
+        await _showForceBlockedDialog();
       } else if (_noPublishedRelease) {
         BealibDialog.showToast(
             message: '仓库 ${ApiEndpoints.updateRepo} 暂无 Release，请先在 GitHub 发布');
@@ -234,14 +259,30 @@ class AutoUpdater {
     }
   }
 
+  Future<void> _showForceBlockedDialog() async {
+    final policy = lastPolicy;
+    if (policy == null) return;
+    await BealibDialog.show<void>(
+      clickMaskDismiss: false,
+      builder: (context) => UpdateBlockedDialog(
+        reason: policy.reasonFor(ApiEndpoints.version),
+      ),
+    );
+  }
+
   Future<void> _showUpdateDialog(UpdateInfo updateInfo,
       {bool isAutoCheck = false}) async {
+    final force = updateInfo.forceUpdate;
     var disableAutoUpdate = false;
     final choice = await BealibDialog.show<UpdateDialogChoice>(
+      clickMaskDismiss: !force,
       builder: (context) => UpdateAvailableDialog(
         updateInfo: updateInfo,
-        onDisableAutoUpdateChanged:
-            isAutoCheck ? (value) => disableAutoUpdate = value : null,
+        force: force,
+        forceReason: updateInfo.forceReason,
+        onDisableAutoUpdateChanged: isAutoCheck && !force
+            ? (value) => disableAutoUpdate = value
+            : null,
       ),
     );
     if (disableAutoUpdate) {

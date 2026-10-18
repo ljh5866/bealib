@@ -53,6 +53,21 @@ class ApiEndpoints {
     'https://gh-proxy.com/',
   ];
 
+  /// 版本策略文件（仓库根目录 update-policy.json，可在 GitHub 上直接编辑）。
+  static const String updatePolicyApi =
+      'https://api.github.com/repos/$updateRepo/contents/update-policy.json?ref=main';
+  static const String updatePolicyCdn =
+      'https://cdn.jsdelivr.net/gh/$updateRepo@main/update-policy.json';
+  static const String updatePolicyRaw =
+      'https://raw.githubusercontent.com/$updateRepo/main/update-policy.json';
+
+  /// 按顺序尝试的策略地址（Contents API 最新 → jsDelivr → raw）。
+  static const List<String> updatePolicyUrls = [
+    updatePolicyApi,
+    updatePolicyCdn,
+    updatePolicyRaw,
+  ];
+
   /// 发布页（无法应用内下载时打开）。
   static const String latestApp =
       'https://github.com/$updateRepo/releases/latest';

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:bealib/bean/dialog/dialog.dart';
 import 'package:bealib/bean/settings/settings_dropdown_tile.dart';
@@ -5,6 +7,7 @@ import 'package:bealib/bean/settings/settings_list.dart';
 import 'package:bealib/bean/widget/state_presentation.dart';
 import 'package:bealib/bean/widget/tonal_card.dart';
 import 'package:bealib/services/update/auto_updater.dart';
+import 'package:bealib/request/config/api_endpoints.dart';
 import 'package:bealib/services/update/update_download_source.dart';
 import 'package:bealib/utils/date_time.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,12 +23,18 @@ class UpdateAvailableDialog extends StatefulWidget {
     super.key,
     required this.updateInfo,
     this.onDisableAutoUpdateChanged,
+    this.force = false,
+    this.forceReason = '',
   });
 
   final UpdateInfo updateInfo;
 
   /// Shows the auto-update opt-out when non-null.
   final ValueChanged<bool>? onDisableAutoUpdateChanged;
+
+  /// 强制更新：不允许「稍后」和关闭自动检查。
+  final bool force;
+  final String forceReason;
 
   @override
   State<UpdateAvailableDialog> createState() => _UpdateAvailableDialogState();
@@ -49,7 +58,9 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
     final colors = theme.colorScheme;
     final downloadInApp = _type.downloadsInApp;
 
-    return AlertDialog(
+    return PopScope(
+      canPop: !widget.force,
+      child: AlertDialog(
       constraints: const BoxConstraints(minWidth: 280, maxWidth: 440),
       insetPadding: const EdgeInsets.all(24),
       backgroundColor: colors.surfaceContainerHigh,
@@ -66,12 +77,17 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.force && widget.forceReason.isNotEmpty) ...[
+              _buildForceBanner(context),
+              const SizedBox(height: 12),
+            ],
             _buildReleaseNotes(context),
             if (downloadInApp) ...[
               const SizedBox(height: 20),
               _buildDownloadOptions(),
             ],
-            if (widget.onDisableAutoUpdateChanged != null) ...[
+            if (!widget.force &&
+                widget.onDisableAutoUpdateChanged != null) ...[
               const SizedBox(height: 8),
               CheckboxListTile(
                 value: _disableAutoUpdate,
@@ -95,11 +111,12 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
       actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       actionsOverflowButtonSpacing: 8,
       actions: [
-        TextButton(
-          style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
-          onPressed: () => BealibDialog.dismiss(context: context),
-          child: const Text('稍后'),
-        ),
+        if (!widget.force)
+          TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => BealibDialog.dismiss(context: context),
+            child: const Text('稍后'),
+          ),
         StateActionButton(
           onPressed: () => BealibDialog.dismiss(
             context: context,
@@ -111,6 +128,34 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
           text: downloadInApp ? '更新' : '前往下载',
         ),
       ],
+      ),
+    );
+  }
+
+  Widget _buildForceBanner(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.priority_high_rounded,
+              size: 20, color: colors.onErrorContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              widget.forceReason,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onErrorContainer,
+                  ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -136,7 +181,7 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '发现新版本',
+                widget.force ? '必须更新' : '发现新版本',
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: colors.onSurface,
                   fontWeight: FontWeight.w600,
@@ -233,6 +278,66 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
             onChanged: (type) => setState(() => _type = type),
           ),
       ],
+    );
+  }
+}
+
+/// 版本被停用、但当前没有可下载的新版本时的强制提示。
+class UpdateBlockedDialog extends StatelessWidget {
+  const UpdateBlockedDialog({super.key, required this.reason});
+
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 440),
+        insetPadding: const EdgeInsets.all(24),
+        backgroundColor: colors.surfaceContainerHigh,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: Row(
+          children: [
+            Icon(Icons.block_rounded, color: colors.error),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '版本已停用',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          reason,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        actionsOverflowButtonSpacing: 8,
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => exit(0),
+            child: const Text('退出应用'),
+          ),
+          StateActionButton(
+            onPressed: () => launchUrl(
+              Uri.parse(ApiEndpoints.latestApp),
+              mode: LaunchMode.externalApplication,
+            ),
+            icon: Icons.open_in_new_rounded,
+            text: '前往下载',
+          ),
+        ],
+      ),
     );
   }
 }
