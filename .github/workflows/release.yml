@@ -94,7 +94,7 @@ jobs:
           mkdir -p "$HOME/.android"
           if [ -n "${KEYSTORE_BASE64:-}" ]; then
             echo "使用 GitHub Secret 中的 keystore"
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$HOME/.android/debug.keystore"
+            printf '%s' "$KEYSTORE_BASE64" | tr -d ' \t\r\n' | base64 -d > "$HOME/.android/debug.keystore"
           elif [ -f ci/debug.keystore ]; then
             echo "使用仓库内置 ci/debug.keystore"
             cp ci/debug.keystore "$HOME/.android/debug.keystore"
@@ -102,6 +102,12 @@ jobs:
             echo "缺少签名 keystore（配置 ANDROID_DEBUG_KEYSTORE_BASE64 或提交 ci/debug.keystore）" >&2
             exit 1
           fi
+          test -s "$HOME/.android/debug.keystore" || {
+            echo "keystore 恢复失败" >&2
+            exit 1
+          }
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android >/dev/null
+          echo "keystore OK"
 
       - name: Flutter pub get
         run: flutter pub get
