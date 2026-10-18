@@ -1,6 +1,6 @@
 {
-  "minSupportedVersion": "0.1.2",
+  "minSupportedVersion": "0.1.5",
   "blockedVersions": [],
-  "message": "",
+  "message": "测试：低于 0.1.5 的版本已停止支持，请更新到最新版本后继续使用。",
   "updatedAt": "2026-10-18"
 }
