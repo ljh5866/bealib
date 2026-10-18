@@ -29,6 +29,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Normalize local build paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 本机为离线构建把 gradle 发行包指向了本地 file:// 路径，CI 必须换回官方地址
+          python3 - <<'PY'
+          import re
+          p = 'android/gradle/wrapper/gradle-wrapper.properties'
+          s = open(p).read()
+          m = re.search(r'gradle-(\d[\d.]*)-bin', s)
+          ver = m.group(1) if m else '8.14.5'
+          s = re.sub(
+              r'(?m)^distributionUrl=.*$',
+              r'distributionUrl=https\\://services.gradle.org/distributions/gradle-%s-bin.zip' % ver,
+              s,
+          )
+          open(p, 'w').write(s)
+          print(open(p).read())
+          PY
+          chmod +x android/gradlew
+          # 确认没有残留的本机绝对路径
+          if git grep -n -E 'D:[\\/]Bealib' -- . ':!*.dart_tool'; then
+            echo "仓库中仍存在本机绝对路径" >&2
+            exit 1
+          fi
+
       - name: Resolve version
         id: ver
         shell: bash
