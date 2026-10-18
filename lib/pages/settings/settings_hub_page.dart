@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'package:bealib/request/config/api_endpoints.dart';
 import 'package:bealib/utils/theme.dart';
 
@@ -23,7 +25,7 @@ class SettingsHubPage extends StatelessWidget {
         BealibTokens.pagePadding,
         topInset + 14,
         BealibTokens.pagePadding,
-        210,
+        112,
       ),
       children: [
         Text(
@@ -101,10 +103,16 @@ class SettingsHubPage extends StatelessWidget {
               description: '感谢名单',
               route: '/settings/thanks',
             ),
+            _SettingsTileData(
+              icon: Icons.public_rounded,
+              label: '官方网站',
+              description: 'www.ttals.com',
+              url: 'https://www.ttals.com/',
+            ),
           ],
         ),
 
-        const SizedBox(height: 28),
+        const SizedBox(height: 16),
         Center(
           child: Text(
             ApiEndpoints.version,
@@ -121,13 +129,15 @@ class _SettingsTileData {
     required this.icon,
     required this.label,
     required this.description,
-    required this.route,
+    this.route,
+    this.url,
   });
 
   final IconData icon;
   final String label;
   final String description;
-  final String route;
+  final String? route;
+  final String? url;
 }
 
 class _SettingsGroup extends StatelessWidget {
@@ -196,7 +206,18 @@ class _SettingsTile extends StatelessWidget {
       button: true,
       label: '${data.label}，${data.description}',
       child: InkWell(
-        onTap: () => context.pushNamed(data.route),
+        onTap: () async {
+          final String? url = data.url;
+          if (url != null) {
+            await launchUrl(
+              Uri.parse(url),
+              mode: LaunchMode.externalApplication,
+            );
+            return;
+          }
+          final String? route = data.route;
+          if (route != null) context.pushNamed(route);
+        },
         child: Container(
           constraints: const BoxConstraints(minHeight: 68),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -233,8 +254,10 @@ class _SettingsTile extends StatelessWidget {
                 ),
               ),
               Icon(
-                Icons.chevron_right_rounded,
-                size: 22,
+                data.url != null
+                    ? Icons.open_in_new_rounded
+                    : Icons.chevron_right_rounded,
+                size: data.url != null ? 18 : 22,
                 color: scheme.onSurfaceVariant,
               ),
             ],

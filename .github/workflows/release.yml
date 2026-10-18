@@ -179,11 +179,7 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Bealib ${{ steps.ver.outputs.tag }}
           body: |
-            Bealib ${{ steps.ver.outputs.tag }} 更新
-
-            - App 内更新：设置 → 更新设置 → 检查更新（或启动时自动检查）
-            - 规则：仓库规则启动时自动安装并保持更新
-            - 完整更新日志：https://github.com/${{ github.repository }}/releases/tag/${{ steps.ver.outputs.tag }}
+            优化了软件
           files: |
             ${{ steps.artifact.outputs.apk }}
             checksum.txt
