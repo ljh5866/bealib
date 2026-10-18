@@ -114,6 +114,12 @@ const List<_SettingsGroup> _settingsGroups = [
         icon: Icons.info_outline_rounded,
         path: '/settings/about',
       ),
+      _SettingsCategory(
+        label: '致谢',
+        description: '感谢名单',
+        icon: Icons.favorite_outline_rounded,
+        path: '/settings/thanks',
+      ),
     ],
   ),
 ];

@@ -95,6 +95,12 @@ class SettingsHubPage extends StatelessWidget {
               description: '软件介绍与第三方许可',
               route: '/settings/about',
             ),
+            _SettingsTileData(
+              icon: Icons.favorite_outline_rounded,
+              label: '致谢',
+              description: '感谢名单',
+              route: '/settings/thanks',
+            ),
           ],
         ),
 

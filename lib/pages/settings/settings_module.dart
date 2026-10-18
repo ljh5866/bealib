@@ -16,6 +16,7 @@ import 'package:bealib/pages/settings/proxy/proxy_module.dart';
 import 'package:bealib/pages/settings/renderer_settings.dart';
 import 'package:bealib/pages/settings/settings_page.dart';
 import 'package:bealib/pages/settings/storage_settings.dart';
+import 'package:bealib/pages/settings/thanks_page.dart';
 import 'package:bealib/pages/settings/super_resolution_settings.dart';
 import 'package:bealib/pages/settings/sync/bangumi_sync_page.dart';
 import 'package:bealib/pages/settings/sync/sync_settings_page.dart';
