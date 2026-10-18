@@ -69,10 +69,19 @@ jobs:
             echo "无法解析版本号" >&2
             exit 1
           fi
+          # versionCode derived from semantic version so it is monotonic:
+          # 1.0.1 -> 10001, 1.0.2 -> 10002, 1.1.0 -> 10100.
+          MAJOR="$(echo "$VERSION" | cut -d. -f1 | tr -cd '0-9')"
+          MINOR="$(echo "$VERSION" | cut -d. -f2 | tr -cd '0-9')"
+          PATCH="$(echo "$VERSION" | cut -d. -f3 | tr -cd '0-9')"
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+          BUILD_NUMBER=$((10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH))
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "Resolved version: $VERSION (build ${GITHUB_RUN_NUMBER})"
+          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (build $BUILD_NUMBER)"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
