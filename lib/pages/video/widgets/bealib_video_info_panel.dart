@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 
 import 'package:bealib/bean/card/network_img_layer.dart';
+import 'package:bealib/bean/widget/image_preview.dart';
 import 'package:bealib/modules/bangumi/bangumi_item.dart';
 import 'package:bealib/modules/bangumi/bangumi_relation.dart';
 import 'package:bealib/modules/characters/character_item.dart';
@@ -268,14 +269,31 @@ class _BealibVideoInfoPanelState extends State<BealibVideoInfoPanel> {
         style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
       );
     }
+    final List<String> avatars = <String>[
+      for (final CharacterItem character in _characters)
+        if (_characterAvatarUrl(character).isNotEmpty)
+          _characterAvatarUrl(character),
+    ];
     return SizedBox(
       height: 168,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _characters.length,
         separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (context, index) =>
-            _CharacterCard(character: _characters[index]),
+        itemBuilder: (context, index) {
+          final CharacterItem character = _characters[index];
+          final String avatar = _characterAvatarUrl(character);
+          return _CharacterCard(
+            character: character,
+            onImageTap: avatar.isEmpty
+                ? null
+                : () => ImageViewer.show(
+                      context,
+                      imageUrls: avatars,
+                      initialIndex: avatars.indexOf(avatar),
+                    ),
+          );
+        },
       ),
     );
   }
@@ -331,10 +349,19 @@ class _BealibVideoInfoPanelState extends State<BealibVideoInfoPanel> {
   }
 }
 
+String _characterAvatarUrl(CharacterItem character) {
+  final CharacterAvator avator = character.avator;
+  for (final String url in [avator.large, avator.medium, avator.grid]) {
+    if (url.isNotEmpty) return url;
+  }
+  return '';
+}
+
 class _CharacterCard extends StatelessWidget {
-  const _CharacterCard({required this.character});
+  const _CharacterCard({required this.character, this.onImageTap});
 
   final CharacterItem character;
+  final VoidCallback? onImageTap;
 
   String get _name {
     final String cn = character.info.nameCn.trim();
@@ -350,13 +377,7 @@ class _CharacterCard extends StatelessWidget {
     return names.isEmpty ? '' : 'CV：${names.join(' / ')}';
   }
 
-  String get _avatar {
-    final avator = character.avator;
-    for (final String url in [avator.large, avator.medium, avator.grid]) {
-      if (url.isNotEmpty) return url;
-    }
-    return '';
-  }
+  String get _avatar => _characterAvatarUrl(character);
 
   @override
   Widget build(BuildContext context) {
@@ -377,12 +398,19 @@ class _CharacterCard extends StatelessWidget {
               ),
             )
           else
-            NetworkImgLayer(
-              src: _avatar,
-              width: 92,
-              height: 112,
-              fit: BoxFit.cover,
-              borderRadius: BorderRadius.circular(14),
+            Semantics(
+              button: true,
+              label: '查看 $_name 图片',
+              child: GestureDetector(
+                onTap: onImageTap,
+                child: NetworkImgLayer(
+                  src: _avatar,
+                  width: 92,
+                  height: 112,
+                  fit: BoxFit.cover,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
             ),
           const SizedBox(height: 6),
           Text(
