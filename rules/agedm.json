@@ -1,0 +1,21 @@
+{
+    "api": "1",
+    "type": "anime",
+    "name": "AGE动漫",
+    "version": "1.0.0",
+    "muliSources": true,
+    "useWebview": true,
+    "useNativePlayer": true,
+    "usePost": false,
+    "useLegacyParser": false,
+    "adBlocker": false,
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "baseURL": "https://www.agedm.io/",
+    "searchURL": "https://www.agedm.io/search?query=@keyword",
+    "searchList": "//*[@id=\"cata_video_list\"]/div/div",
+    "searchName": ".//h5/a",
+    "searchResult": ".//h5/a",
+    "chapterRoads": "//div[@class*=\"tab-pane\"]",
+    "chapterResult": ".//ul/li/a",
+    "referer": "https://www.agedm.io/"
+}
