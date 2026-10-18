@@ -19,22 +19,40 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   static const int _pageSize = 12;
+  static const Duration _receiveTimeout = Duration(seconds: 20);
+  static const double _loadMoreThreshold = 480;
 
   final List<BangumiItem> _items = <BangumiItem>[];
+  final Set<int> _itemIds = <int>{};
+  final ScrollController _scrollController = ScrollController();
+
   bool _loading = true;
+  bool _loadingMore = false;
+  bool _hasMore = true;
+  bool _loadMoreFailed = false;
   int _offset = 0;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
   }
 
   /// 推荐数据源：镜像服务在国内网络下延迟抖动较大（实测 3s–45s），
   /// 因此这里单独放宽接收超时，并在失败时自动重试一次、再换源兜底。
-  static const Duration _receiveTimeout = Duration(seconds: 20);
-
-  Future<List<BangumiItem>> _fetch({required int limit, required int offset}) async {
+  Future<List<BangumiItem>> _fetch({
+    required int limit,
+    required int offset,
+  }) async {
     final bool useMirror =
         BangumiAcceleration.current == BangumiAcceleration.mirror;
 
@@ -63,39 +81,102 @@ class _HomePageState extends State<HomePage> {
     return useMirror ? await queryDirect() : await queryMirror();
   }
 
-  Future<void> _load({bool shuffle = false}) async {
-    if (mounted) setState(() => _loading = true);
-    if (shuffle) {
-      _offset = (_offset + _pageSize) % 96;
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final ScrollPosition position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+      _loadMore();
     }
+  }
+
+  void _replaceItems(List<BangumiItem> items) {
+    _items.clear();
+    _itemIds.clear();
+    for (final BangumiItem item in items) {
+      if (_itemIds.add(item.id)) {
+        _items.add(item);
+      }
+    }
+  }
+
+  Future<void> _load() async {
+    final int generation = ++_generation;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadingMore = false;
+        _loadMoreFailed = false;
+        _hasMore = true;
+      });
+    }
+    _offset = 0;
+
     // 首屏先用上次成功的缓存秒开，再走网络刷新（镜像延迟抖动大）。
     if (_items.isEmpty) {
       final cached = await BangumiApi.getBangumiMirrorPopularSubjects(
         limit: _pageSize,
-        offset: _offset,
+        offset: 0,
         allowStale: true,
       );
-      if (cached.isNotEmpty && mounted) {
+      if (cached.isNotEmpty && mounted && generation == _generation) {
         setState(() {
-          _items
-            ..clear()
-            ..addAll(cached);
+          _replaceItems(cached);
+          _offset = _pageSize;
+          _hasMore = cached.length >= _pageSize;
           _loading = false;
         });
       }
     }
-    final List<BangumiItem> result = await _fetch(
-      limit: _pageSize,
-      offset: _offset,
-    );
-    if (!mounted) return;
+
+    List<BangumiItem> result = const <BangumiItem>[];
+    try {
+      result = await _fetch(limit: _pageSize, offset: 0);
+    } catch (_) {
+      // 网络失败时保留已有内容（缓存或上一次列表）。
+    }
+    if (!mounted || generation != _generation) return;
     setState(() {
       if (result.isNotEmpty) {
-        _items
-          ..clear()
-          ..addAll(result);
+        _replaceItems(result);
+        _offset = _pageSize;
+        _hasMore = result.length >= _pageSize;
       }
       _loading = false;
+    });
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading || _loadingMore || !_hasMore) return;
+    final int generation = _generation;
+    final int nextOffset = _offset;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreFailed = false;
+    });
+    List<BangumiItem> result;
+    try {
+      result = await _fetch(limit: _pageSize, offset: nextOffset);
+    } catch (_) {
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _loadingMore = false;
+        _loadMoreFailed = true;
+      });
+      return;
+    }
+    if (!mounted || generation != _generation) return;
+
+    final List<BangumiItem> fresh = <BangumiItem>[];
+    for (final BangumiItem item in result) {
+      if (_itemIds.add(item.id)) {
+        fresh.add(item);
+      }
+    }
+    setState(() {
+      _items.addAll(fresh);
+      _offset = nextOffset + _pageSize;
+      _hasMore = result.length >= _pageSize && fresh.isNotEmpty;
+      _loadingMore = false;
     });
   }
 
@@ -126,6 +207,7 @@ class _HomePageState extends State<HomePage> {
       onRefresh: _load,
       color: scheme.primary,
       child: CustomScrollView(
+        controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
@@ -254,6 +336,46 @@ class _HomePageState extends State<HomePage> {
                     );
                   },
                   childCount: _items.length,
+                ),
+              ),
+            ),
+          if (_loadingMore)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 18),
+                child: Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
+                ),
+              ),
+            ),
+          if (_loadMoreFailed)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Center(
+                  child: TextButton.icon(
+                    onPressed: _loadMore,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('加载更多失败，点击重试'),
+                  ),
+                ),
+              ),
+            ),
+          if (!_hasMore && _items.length > _pageSize)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: Text(
+                    '已经到底了',
+                    style: text.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                 ),
               ),
             ),
