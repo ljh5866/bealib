@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:bealib/request/clients/download_http_client.dart';
+import 'package:bealib/request/config/api_endpoints.dart';
 import 'package:bealib/request/core/network_exception.dart';
 import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/update/update_download_source.dart';
@@ -129,26 +130,50 @@ Future<String> downloadUpdateFile({
   final downloadDir = await file.parent.createTemp('bealib-update-');
   try {
     final partial = File('${downloadDir.path}/download.part');
-    await DownloadHttpClient.instance.download(
-      url,
-      partial.path,
-      cancelToken: cancelToken,
-      onReceiveProgress: (received, total) {
-        if (!cancelToken.isCancelled) onReceiveProgress(received, total);
-      },
+    final attempts = updateDownloadCandidates(url);
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (var i = 0; i < attempts.length; i++) {
+      final attemptUrl = attempts[i];
+      checkCancelled();
+      try {
+        if (i > 0) {
+          onReceiveProgress(0, 0);
+          BealibLogger().i('Update: retrying download via $attemptUrl');
+        }
+        await DownloadHttpClient.instance.download(
+          attemptUrl,
+          partial.path,
+          cancelToken: cancelToken,
+          onReceiveProgress: (received, total) {
+            if (!cancelToken.isCancelled) onReceiveProgress(received, total);
+          },
+        );
+        checkCancelled();
+        final downloadedHash = await calculateFileHash(partial);
+        checkCancelled();
+        if (verifyHash && downloadedHash != hash) {
+          throw UpdateIntegrityException(hash, downloadedHash);
+        }
+        if (!verifyHash) {
+          BealibLogger()
+              .w('Update: asset has no SHA256 digest, skipped verification');
+        }
+        await partial.rename(filePath);
+        onReceiveProgress(1, 1);
+        return filePath;
+      } on Exception catch (error, stackTrace) {
+        if (cancelToken.isCancelled) rethrow;
+        lastError = error;
+        lastStackTrace = stackTrace;
+        BealibLogger()
+            .w('Update: download attempt failed ($attemptUrl)', error: error);
+      }
+    }
+    Error.throwWithStackTrace(
+      lastError ?? Exception('下载失败'),
+      lastStackTrace ?? StackTrace.current,
     );
-    checkCancelled();
-    final downloadedHash = await calculateFileHash(partial);
-    checkCancelled();
-    if (verifyHash && downloadedHash != hash) {
-      throw UpdateIntegrityException(hash, downloadedHash);
-    }
-    if (!verifyHash) {
-      BealibLogger().w('Update: asset has no SHA256 digest, skipped verification');
-    }
-    await partial.rename(filePath);
-    onReceiveProgress(1, 1);
-    return filePath;
   } finally {
     try {
       await downloadDir.delete(recursive: true);
@@ -156,4 +181,21 @@ Future<String> downloadUpdateFile({
       BealibLogger().w('Update: temp download cleanup failed', error: e);
     }
   }
+}
+
+/// 下载候选地址：GitHub 原地址 + 可用代理（GitHub 资产下载被墙/超时时兜底）。
+List<String> updateDownloadCandidates(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return const [];
+  final candidates = <String>[trimmed];
+  final isGithubRelease =
+      trimmed.startsWith('https://github.com/') ||
+          trimmed.startsWith('http://github.com/');
+  if (isGithubRelease) {
+    for (final proxy in ApiEndpoints.updateDownloadProxies) {
+      final candidate = '$proxy$trimmed';
+      if (!candidates.contains(candidate)) candidates.add(candidate);
+    }
+  }
+  return candidates;
 }

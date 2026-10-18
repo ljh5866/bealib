@@ -43,6 +43,16 @@ class ApiEndpoints {
       ? _updateApiOverride
       : 'https://api.github.com/repos/$updateRepo/releases/latest';
 
+  /// GitHub Release 资产下载代理（按顺序尝试）。
+  ///
+  /// 部分网络能访问 GitHub API，但下载 release 资产会超时/被重置；
+  /// 此时自动用这些代理前缀重试（代理地址后可拼接完整 GitHub URL）。
+  static const List<String> updateDownloadProxies = [
+    'https://ghfast.top/',
+    'https://ghproxy.net/',
+    'https://gh-proxy.com/',
+  ];
+
   /// 发布页（无法应用内下载时打开）。
   static const String latestApp =
       'https://github.com/$updateRepo/releases/latest';
