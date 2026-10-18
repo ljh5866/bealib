@@ -87,6 +87,10 @@ final settingsModule = createModule(
           ..route(
             '/download-settings',
             child: (context, state) => const DownloadSettingsPage(),
+          )
+          ..route(
+            '/thanks',
+            child: (context, state) => const ThanksPage(),
           );
       },
     );
