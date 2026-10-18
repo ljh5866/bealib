@@ -2,149 +2,54 @@ import 'package:flutter/material.dart';
 
 import 'package:bealib/bean/settings/settings_detail_scaffold.dart';
 import 'package:bealib/bean/widget/content_section.dart';
+import 'package:bealib/bean/widget/tonal_card.dart';
+import 'package:bealib/pages/about/about_intro.dart';
 import 'package:bealib/pages/about/about_widgets.dart';
-import 'package:bealib/request/config/api_endpoints.dart';
 
+/// 关于页：只展示「软件介绍」与「第三方许可」。
 class AboutPage extends StatelessWidget {
-  const AboutPage({super.key, required this.onCheckUpdate});
-
-  final Future<bool> Function() onCheckUpdate;
-
-  @override
-  Widget build(BuildContext context) => SettingsDetailScaffold(
-        title: const Text('关于'),
-        body: AboutContent(
-          children: [
-            _ProjectHeader(onCheckUpdate: onCheckUpdate),
-            const SizedBox(height: 24),
-            LayoutBuilder(builder: (context, constraints) {
-              final sections = [
-                ContentSection.group(
-                  title: '项目',
-                  children: const [
-                    AboutLinkTile(
-                      icon: Icons.code_rounded,
-                      title: '源代码',
-                      url: ApiEndpoints.sourceUrl,
-                    ),
-                    AboutLinkTile(
-                      icon: Icons.language_rounded,
-                      title: '项目主页',
-                      url: ApiEndpoints.projectUrl,
-                    ),
-                    AboutLinkTile(
-                      icon: Icons.bug_report_rounded,
-                      title: '问题反馈',
-                      url: '${ApiEndpoints.sourceUrl}/issues',
-                    ),
-                    AboutLinkTile(
-                      icon: Icons.forum_rounded,
-                      title: 'Telegram',
-                      url: ApiEndpoints.telegramGroup,
-                    ),
-                  ],
-                ),
-                ContentSection.group(
-                  title: '开源',
-                  children: [
-                    const AboutLinkTile(
-                      icon: Icons.handshake_outlined,
-                      title: '贡献指南',
-                      url:
-                          '${ApiEndpoints.sourceUrl}/blob/main/static/doc/CONTRIBUTING.md',
-                    ),
-                    const AboutLinkTile.route(
-                      icon: Icons.favorite_outline_rounded,
-                      title: '致谢',
-                      route: '/settings/about/credits',
-                    ),
-                    const AboutLinkTile(
-                      icon: Icons.balance_rounded,
-                      title: 'GPL-3.0 许可证',
-                      url: '${ApiEndpoints.sourceUrl}/blob/main/LICENSE',
-                    ),
-                    const AboutLinkTile.route(
-                      icon: Icons.description_outlined,
-                      title: '第三方许可证',
-                      route: '/settings/about/license',
-                    ),
-                  ],
-                ),
-              ];
-              if (constraints.maxWidth >= 640 &&
-                  MediaQuery.textScalerOf(context).scale(14) < 21) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: sections[0]),
-                    const SizedBox(width: 16),
-                    Expanded(child: sections[1]),
-                  ],
-                );
-              }
-              return Column(
-                children: [
-                  sections[0],
-                  const SizedBox(height: 24),
-                  sections[1]
-                ],
-              );
-            }),
-          ],
-        ),
-      );
-}
-
-class _ProjectHeader extends StatelessWidget {
-  const _ProjectHeader({required this.onCheckUpdate});
-
-  final Future<bool> Function() onCheckUpdate;
+  const AboutPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final intro = bealibAboutIntro.trim();
+
+    return SettingsDetailScaffold(
+      title: const Text('关于'),
+      body: AboutContent(
         children: [
-          Semantics(
-            header: true,
-            child: Text(
-              'Bealib',
-              style: theme.textTheme.displayMedium?.copyWith(
-                color: colors.primary,
-                fontWeight: FontWeight.w600,
-              ),
+          Text(
+            '软件介绍',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: colors.primary,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            ApiEndpoints.version,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
+          const SizedBox(height: 8),
+          TonalCard(
+            padding: const EdgeInsets.all(16),
+            child: intro.isEmpty
+                ? Text(
+                    '软件介绍暂未填写。',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  )
+                : Text(
+                    intro,
+                    style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
+                  ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            '基于自定义规则的开源番剧应用',
-            style: theme.textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              CheckUpdateButton(onCheckUpdate: onCheckUpdate),
-              TextButton(
-                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                onPressed: () => openAboutLink(
-                  context,
-                  '${ApiEndpoints.sourceUrl}/releases',
-                ),
-                child: const Text('更新日志'),
+          const SizedBox(height: 24),
+          ContentSection.group(
+            title: '第三方许可',
+            children: const [
+              AboutLinkTile.route(
+                icon: Icons.description_outlined,
+                title: '查看第三方许可',
+                route: '/settings/about/license',
               ),
             ],
           ),
