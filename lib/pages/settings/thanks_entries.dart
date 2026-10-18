@@ -13,7 +13,7 @@ class ThanksEntry {
 
 /// TODO: 把 xxx 换成你要感谢的人或项目。
 const List<ThanksEntry> bealibThanksEntries = <ThanksEntry>[
-  ThanksEntry(name: 'xxx', description: 'xxx'),
-  ThanksEntry(name: 'xxx', description: 'xxx'),
-  ThanksEntry(name: 'xxx', description: 'xxx'),
+  ThanksEntry(name: '远哥', description: '赞赏20元'),
+  ThanksEntry(name: 'kazumi', description: '代码开源'),
+  ThanksEntry(name: '......', description: '......'),
 ];
