@@ -263,7 +263,11 @@ class _VideoPageState extends State<VideoPage>
         });
         return;
       }
-      final fastest = await RuleResolver.probeAll(plugins, keyword);
+      final fastest = await RuleResolver.probeAll(
+        plugins,
+        keyword,
+        target: videoPageController.bangumiItem,
+      );
       if (!mounted) return;
       if (fastest == null) {
         setState(() {

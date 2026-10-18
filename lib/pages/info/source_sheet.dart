@@ -23,6 +23,7 @@ import 'package:bealib/plugins/plugins_controller.dart';
 import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/plugin/captcha_verification_service.dart';
 import 'package:bealib/services/plugin/plugin_search_service.dart';
+import 'package:bealib/services/plugin/search_result_matcher.dart';
 import 'package:bealib/services/plugin/rule_speed_cache.dart';
 import 'package:bealib/services/storage/storage.dart';
 import 'package:bealib/services/plugin/rule_engine_models.dart'
@@ -93,7 +94,13 @@ class _SourceSheetState extends State<SourceSheet> with BealibDialogOwner {
     for (final response in widget.infoController.pluginSearchResponseList) {
       if (response.pluginName != fastest || response.data.isEmpty) continue;
       BealibDialog.showToast(message: '已自动选择最快规则：$fastest');
-      await _openSearchItem(fastest, response.data.first, fromAuto: true);
+      final SearchItem item = SearchResultMatcher.pickBest(
+            response.data,
+            keyword: _keyword,
+            target: widget.infoController.bangumiItem,
+          ) ??
+          response.data.first;
+      await _openSearchItem(fastest, item, fromAuto: true);
       return;
     }
   }

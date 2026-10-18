@@ -1,8 +1,10 @@
+import 'package:bealib/modules/bangumi/bangumi_item.dart';
 import 'package:bealib/modules/roads/road_module.dart';
 import 'package:bealib/modules/search/plugin_search_module.dart';
 import 'package:bealib/plugins/plugins.dart';
 import 'package:bealib/services/logging/logger.dart';
 import 'package:bealib/services/plugin/rule_engine_models.dart';
+import 'package:bealib/services/plugin/search_result_matcher.dart';
 import 'package:bealib/services/plugin/rule_speed_cache.dart';
 
 /// 一次规则检索的结果（含耗时，用于「默认选中速度最优规则」）。
@@ -54,6 +56,9 @@ class RuleResolver {
   static final List<RuleProbe> lastProbes = <RuleProbe>[];
   static String lastKeyword = '';
 
+  /// 最近一次检索对应的番剧（用于在搜索结果里挑出匹配项）。
+  static BangumiItem? lastTarget;
+
   /// 关键词 -> 规则检索结果缓存（10 分钟内重复进入同一部番剧不再重新检索）。
   static final Map<String, _ProbeCache> _probeCache = <String, _ProbeCache>{};
 
@@ -80,10 +85,13 @@ class RuleResolver {
   /// 同一关键词 10 分钟内直接复用上次结果，避免每次进入番剧都全量测速。
   static Future<RuleProbe?> probeAll(
     List<Plugin> plugins,
-    String keyword,
-  ) async {
+    String keyword, {
+    BangumiItem? target,
+  }) async {
     lastKeyword = keyword;
-    final cached = _probeCache[keyword];
+    lastTarget = target;
+    final String cacheKey = '${target?.id ?? 0}|$keyword';
+    final cached = _probeCache[cacheKey];
     if (cached != null &&
         DateTime.now().difference(cached.storedAt) <= _cacheTtl &&
         cached.probes.length == plugins.length &&
@@ -100,7 +108,7 @@ class RuleResolver {
       ..addAll(plugins.map(RuleProbe.new));
     await Future.wait(lastProbes.map(_probeOne));
     _rank();
-    _probeCache[keyword] = _ProbeCache(
+    _probeCache[cacheKey] = _ProbeCache(
       storedAt: DateTime.now(),
       probes: lastProbes.map((probe) => probe.clone()).toList(),
     );
@@ -114,7 +122,11 @@ class RuleResolver {
           .queryBangumi(lastKeyword, shouldRethrow: true)
           .timeout(probeTimeout);
       probe.elapsedMs = stopwatch.elapsedMilliseconds;
-      probe.item = response.data.isNotEmpty ? response.data.first : null;
+      probe.item = SearchResultMatcher.pickBest(
+        response.data,
+        keyword: lastKeyword,
+        target: lastTarget,
+      );
       probe.noResult = probe.item == null;
       if (probe.item != null) {
         RuleSpeedCache.instance.record(
