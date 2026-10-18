@@ -133,6 +133,7 @@ flutter:
     - assets/shaders/
     - assets/images/logo/
     - assets/statements/
+    - assets/rules/
     - licenses/ech_http/
   fonts:
     - family: Inter

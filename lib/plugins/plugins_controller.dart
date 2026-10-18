@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:mobx/mobx.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:bealib/plugins/plugins.dart';
+import 'package:bealib/services/plugin/builtin_rules.dart';
 import 'package:bealib/services/plugin/plugin_validity_tracker.dart';
 import 'package:bealib/request/apis/plugin_catalog_api.dart';
 import 'package:bealib/modules/plugin/plugin_http_module.dart';
@@ -112,6 +113,8 @@ abstract class _PluginsController with Store {
     } else {
       await _migrateLegacyPlugins(legacyDirectory);
     }
+    await _installBuiltinRules();
+
     // 写死策略：仓库规则默认全部安装载入（后台补齐，不阻塞启动）。
     unawaited(
       ensureAllCatalogRulesInstalled().then<void>(
@@ -125,6 +128,47 @@ abstract class _PluginsController with Store {
         },
       ),
     );
+  }
+
+  /// 内置规则：缺失则安装；内置文件版本更高时自动更新（用户无需手动导入）。
+  Future<void> _installBuiltinRules() async {
+    final List<Plugin> builtinPlugins = await BuiltinRules.load();
+    if (builtinPlugins.isEmpty) return;
+    bool changed = false;
+    for (final Plugin builtin in builtinPlugins) {
+      final String key = pluginNameKey(builtin.name);
+      final int index = pluginList.indexWhere(
+        (candidate) => pluginNameKey(candidate.name) == key,
+      );
+      if (index < 0) {
+        pluginList.add(builtin);
+        changed = true;
+        BealibLogger().i(
+          'BuiltinRules: installed ${builtin.name} ${builtin.version}',
+        );
+        continue;
+      }
+      final Plugin existing = pluginList[index];
+      if (_isBuiltinNewer(builtin, existing)) {
+        pluginList.replaceRange(index, index + 1, [builtin]);
+        changed = true;
+        BealibLogger().i(
+          'BuiltinRules: updated ${builtin.name} to ${builtin.version}',
+        );
+      }
+    }
+    if (changed) {
+      await _savePlugins();
+    }
+  }
+
+  bool _isBuiltinNewer(Plugin builtin, Plugin existing) {
+    final String builtinVersion = builtin.version.trim();
+    final String existingVersion = existing.version.trim();
+    if (builtinVersion.isEmpty || builtinVersion == existingVersion) {
+      return false;
+    }
+    return needUpdate(existingVersion, builtinVersion);
   }
 
   /// 确保仓库里的全部规则都已安装（缺失则下载，过期则更新）。
