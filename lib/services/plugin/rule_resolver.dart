@@ -13,6 +13,9 @@ class RuleProbe {
 
   final Plugin plugin;
   SearchItem? item;
+
+  /// 该规则返回的全部搜索结果（用于手动选择片源）。
+  List<SearchItem> items = const <SearchItem>[];
   int elapsedMs = 0;
   bool noResult = false;
   String? error;
@@ -23,6 +26,7 @@ class RuleProbe {
   RuleProbe clone() {
     return RuleProbe(plugin)
       ..item = item
+      ..items = items
       ..elapsedMs = elapsedMs
       ..noResult = noResult
       ..error = error;
@@ -122,6 +126,7 @@ class RuleResolver {
           .queryBangumi(lastKeyword, shouldRethrow: true)
           .timeout(probeTimeout);
       probe.elapsedMs = stopwatch.elapsedMilliseconds;
+      probe.items = response.data;
       probe.item = SearchResultMatcher.pickBest(
         response.data,
         keyword: lastKeyword,
