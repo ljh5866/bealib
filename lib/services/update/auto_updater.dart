@@ -274,23 +274,29 @@ class AutoUpdater {
       {bool isAutoCheck = false}) async {
     final force = updateInfo.forceUpdate;
     var disableAutoUpdate = false;
-    final choice = await BealibDialog.show<UpdateDialogChoice>(
-      clickMaskDismiss: !force,
-      builder: (context) => UpdateAvailableDialog(
-        updateInfo: updateInfo,
-        force: force,
-        forceReason: updateInfo.forceReason,
-        onDisableAutoUpdateChanged: isAutoCheck && !force
-            ? (value) => disableAutoUpdate = value
-            : null,
-      ),
-    );
-    if (disableAutoUpdate) {
-      GStorage.putSetting(SettingsKeys.autoUpdate, false);
-      BealibDialog.showToast(message: '已关闭自动更新');
-    }
-    if (choice != null) {
-      _downloadUpdateWithType(updateInfo, choice.type, choice.source);
+    // 强制更新不允许取消：弹窗被系统返回键等方式关闭时，短暂等待后重新弹出。
+    for (var attempt = 0; attempt < 5; attempt++) {
+      final choice = await BealibDialog.show<UpdateDialogChoice>(
+        clickMaskDismiss: !force,
+        builder: (context) => UpdateAvailableDialog(
+          updateInfo: updateInfo,
+          force: force,
+          forceReason: updateInfo.forceReason,
+          onDisableAutoUpdateChanged: isAutoCheck && !force
+              ? (value) => disableAutoUpdate = value
+              : null,
+        ),
+      );
+      if (disableAutoUpdate) {
+        GStorage.putSetting(SettingsKeys.autoUpdate, false);
+        BealibDialog.showToast(message: '已关闭自动更新');
+      }
+      if (choice != null) {
+        _downloadUpdateWithType(updateInfo, choice.type, choice.source);
+        return;
+      }
+      if (!force) return;
+      await Future<void>.delayed(const Duration(milliseconds: 400));
     }
   }
 
@@ -326,7 +332,11 @@ class AutoUpdater {
         assets: updateInfo.assets,
       );
 
-      _downloadUpdate(downloadInfo, expectedHash);
+      _downloadUpdate(
+        downloadInfo,
+        expectedHash,
+        force: updateInfo.forceUpdate,
+      );
     } catch (e) {
       BealibDialog.showToast(message: '下载失败: ${e.toString()}');
       BealibLogger().e('Update: download update failed', error: e);
@@ -334,7 +344,8 @@ class AutoUpdater {
   }
 
   Future<void> _downloadUpdate(
-      UpdateInfo updateInfo, String expectedHash) async {
+      UpdateInfo updateInfo, String expectedHash,
+      {bool force = false}) async {
     if (_downloadDialogs.isRunning) return;
     await _downloadDialogs.run((task) async {
       _downloadProgress.value = 0;
@@ -344,53 +355,64 @@ class AutoUpdater {
             expectedHash, cancelToken),
         onCancel: cancelToken.cancel,
         builder: (context) {
-          return AlertDialog(
-            title: const Text('正在下载更新'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ValueListenableBuilder<double>(
-                  valueListenable: _downloadProgress,
-                  builder: (context, value, child) {
-                    return Column(
-                      children: [
-                        LinearProgressIndicator(value: value),
-                        const SizedBox(height: 8),
-                        Text('${(value * 100).toStringAsFixed(1)}%'),
-                      ],
-                    );
-                  },
-                ),
+          return PopScope(
+            canPop: !force,
+            child: AlertDialog(
+              title: const Text('正在下载更新'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<double>(
+                    valueListenable: _downloadProgress,
+                    builder: (context, value, child) {
+                      return Column(
+                        children: [
+                          LinearProgressIndicator(value: value),
+                          const SizedBox(height: 8),
+                          Text('${(value * 100).toStringAsFixed(1)}%'),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                if (!force)
+                  TextButton(
+                    onPressed: () => BealibDialog.dismiss(context: context),
+                    child: const Text('取消'),
+                  ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => BealibDialog.dismiss(context: context),
-                child: const Text('取消'),
-              ),
-            ],
           );
         },
       );
 
-      _showDownloadCompleteDialog(downloadPath, updateInfo);
+      _showDownloadCompleteDialog(downloadPath, updateInfo, force: force);
     }, onError: (e, stackTrace) {
       final errorMessage = getUpdateDownloadErrorMessage(e);
 
-      BealibDialog.show(
-        builder: (context) {
-          return AlertDialog(
-            title: const Text('下载失败'),
-            content: Text(errorMessage),
-            actions: [
-              TextButton(
-                onPressed: () => BealibDialog.dismiss(context: context),
-                child: const Text('确定'),
-              ),
-            ],
-          );
-        },
-      );
+      if (force) {
+        _showForceDownloadErrorDialog(
+          errorMessage,
+          retry: () => _downloadUpdate(updateInfo, expectedHash, force: true),
+        );
+      } else {
+        BealibDialog.show(
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('下载失败'),
+              content: Text(errorMessage),
+              actions: [
+                TextButton(
+                  onPressed: () => BealibDialog.dismiss(context: context),
+                  child: const Text('确定'),
+                ),
+              ],
+            );
+          },
+        );
+      }
 
       BealibLogger().e(
           'Update: download failed | source=${updateInfo.downloadUrl} | '
@@ -399,90 +421,135 @@ class AutoUpdater {
     });
   }
 
-  final ValueNotifier<double> _downloadProgress = ValueNotifier(0.0);
-  final _downloadDialogs = BealibDialogController();
-
-  void _showDownloadCompleteDialog(String filePath, UpdateInfo updateInfo) {
-    BealibDialog.show(
+  Future<void> _showForceDownloadErrorDialog(
+    String message, {
+    required Future<void> Function() retry,
+  }) async {
+    final bool? shouldRetry = await BealibDialog.show<bool>(
+      clickMaskDismiss: false,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('下载完成'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text('新版本 ${updateInfo.version} 已下载完成'),
-                  ),
-                ],
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('下载失败'),
+            content: Text(message),
+            actions: [
+              TextButton.icon(
+                style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+                onPressed: () => launchUrl(
+                  Uri.parse(ApiEndpoints.officialWebsite),
+                  mode: LaunchMode.externalApplication,
+                ),
+                icon: const Icon(Icons.public_rounded, size: 18),
+                label: const Text('访问官网'),
               ),
-              const SizedBox(height: 12),
-              Text(
-                '安装过程中应用将会退出',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '文件位置:',
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    SelectableText(
-                      filePath,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontFamily: 'monospace',
-                          ),
-                    ),
-                  ],
-                ),
+              TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+                onPressed: () =>
+                    BealibDialog.dismiss(context: context, popWith: true),
+                child: const Text('重试'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => BealibDialog.dismiss(),
-              child: Text(
-                '稍后安装',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
+        );
+      },
+    );
+    if (shouldRetry == true) {
+      await retry();
+    }
+  }
+
+  final ValueNotifier<double> _downloadProgress = ValueNotifier(0.0);
+  final _downloadDialogs = BealibDialogController();
+
+  void _showDownloadCompleteDialog(String filePath, UpdateInfo updateInfo,
+      {bool force = false}) {
+    BealibDialog.show(
+      clickMaskDismiss: !force,
+      builder: (context) {
+        return PopScope(
+          canPop: !force,
+          child: AlertDialog(
+            title: const Text('下载完成'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.check_circle,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('新版本 ${updateInfo.version} 已下载完成'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '安装过程中应用将会退出',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '文件位置:',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        filePath,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            if (isDesktop())
+            actions: [
+              if (!force)
+                TextButton(
+                  onPressed: () => BealibDialog.dismiss(),
+                  child: Text(
+                    '稍后安装',
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.outline),
+                  ),
+                ),
+              if (!force && isDesktop())
+                TextButton(
+                  onPressed: () {
+                    BealibDialog.dismiss(context: context);
+                    _revealInFileManager(filePath);
+                  },
+                  child: const Text('打开文件夹'),
+                ),
               TextButton(
                 onPressed: () {
-                  BealibDialog.dismiss(context: context);
-                  _revealInFileManager(filePath);
+                  BealibDialog.dismiss();
+                  _installUpdate(
+                      filePath, updateInfo.recommendedInstallationType);
                 },
-                child: const Text('打开文件夹'),
+                child: const Text('立即安装'),
               ),
-            TextButton(
-              onPressed: () {
-                BealibDialog.dismiss();
-                _installUpdate(
-                    filePath, updateInfo.recommendedInstallationType);
-              },
-              child: const Text('立即安装'),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );

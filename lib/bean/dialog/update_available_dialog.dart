@@ -111,7 +111,17 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
       actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       actionsOverflowButtonSpacing: 8,
       actions: [
-        if (!widget.force)
+        if (widget.force)
+          TextButton.icon(
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => launchUrl(
+              Uri.parse(ApiEndpoints.officialWebsite),
+              mode: LaunchMode.externalApplication,
+            ),
+            icon: const Icon(Icons.public_rounded, size: 18),
+            label: const Text('访问官网'),
+          )
+        else
           TextButton(
             style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
             onPressed: () => BealibDialog.dismiss(context: context),
@@ -164,7 +174,8 @@ class _UpdateAvailableDialogState extends State<UpdateAvailableDialog> {
     final colors = theme.colorScheme;
     final info = widget.updateInfo;
     // The fallback action already opens the release page.
-    final showReleasePage = downloadInApp && info.releaseNotes.isNotEmpty;
+    final showReleasePage =
+        downloadInApp && info.releaseNotes.isNotEmpty && !widget.force;
 
     return Row(
       children: [

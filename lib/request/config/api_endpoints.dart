@@ -68,6 +68,9 @@ class ApiEndpoints {
     updatePolicyRaw,
   ];
 
+  /// 官方网站。
+  static const String officialWebsite = 'https://www.ttals.com/';
+
   /// 发布页（无法应用内下载时打开）。
   static const String latestApp =
       'https://github.com/$updateRepo/releases/latest';
