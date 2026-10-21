@@ -15,6 +15,7 @@ import 'package:bealib/pages/settings/player_settings.dart';
 import 'package:bealib/pages/settings/proxy/proxy_module.dart';
 import 'package:bealib/pages/settings/renderer_settings.dart';
 import 'package:bealib/pages/settings/settings_page.dart';
+import 'package:bealib/pages/settings/announcement_page.dart';
 import 'package:bealib/pages/settings/storage_settings.dart';
 import 'package:bealib/pages/settings/thanks_page.dart';
 import 'package:bealib/pages/settings/super_resolution_settings.dart';
@@ -91,6 +92,10 @@ final settingsModule = createModule(
           ..route(
             '/thanks',
             child: (context, state) => const ThanksPage(),
+          )
+          ..route(
+            '/announcement',
+            child: (context, state) => const AnnouncementPage(),
           );
       },
     );

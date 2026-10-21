@@ -64,6 +64,11 @@ class SettingsKeys {
     true,
     group: SettingGroup.misc,
   );
+  static const announcementSeenId = SettingKey<String>(
+    'announcementSeenId',
+    '',
+    group: SettingGroup.misc,
+  );
   static const autoUpdate = SettingKey<bool>(
     _SettingBoxKey.autoUpdate,
     true,
@@ -589,6 +594,7 @@ class SettingsKeys {
     hAenable,
     hardwareDecoder,
     searchEnhanceEnable,
+    announcementSeenId,
     autoUpdate,
     checkPluginUpdateOnStartup,
     alwaysOntop,

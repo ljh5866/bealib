@@ -17,6 +17,7 @@ import 'package:bealib/pages/plugin_editor/plugin_update_actions.dart';
 import 'package:bealib/services/download/background_download_service.dart';
 import 'package:bealib/services/platform/windows_shortcut.dart';
 import 'package:bealib/services/platform/platform_environment_service.dart';
+import 'package:bealib/services/notice/announcement_service.dart';
 import 'package:bealib/services/update/startup_update_check.dart';
 import 'package:bealib/navigation.dart';
 
@@ -89,6 +90,17 @@ class _InitPageState extends State<InitPage> {
       checkForUpdate: () => updateController.checkUpdate(type: 'auto'),
     ));
     context.navigate(GStorage.getSetting(SettingsKeys.defaultStartupPage));
+    _scheduleAnnouncement();
+  }
+
+  /// 启动进入首页后弹一次公告（同一公告 id 只弹一次）。
+  void _scheduleAnnouncement() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(Future<void>.delayed(
+        const Duration(milliseconds: 1500),
+        () => const AnnouncementService().maybeShow(),
+      ));
+    });
   }
 
   void _setupBackgroundDownloadNavigation() {

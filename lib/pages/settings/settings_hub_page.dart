@@ -92,6 +92,12 @@ class SettingsHubPage extends StatelessWidget {
               route: '/settings/update',
             ),
             _SettingsTileData(
+              icon: Icons.campaign_outlined,
+              label: '公告',
+              description: '项目公告与说明',
+              route: '/settings/announcement',
+            ),
+            _SettingsTileData(
               icon: Icons.info_outline_rounded,
               label: '关于',
               description: '软件介绍与第三方许可',
