@@ -36,7 +36,9 @@ class AnnouncementService {
   Future<void> showDialog({bool markSeen = false}) async {
     if (BealibDialog.observer.hasBealibDialog) return;
     await BealibDialog.show<void>(
-      builder: (context) => AnnouncementDialog(announcement: bealibAnnouncement),
+      clickMaskDismiss: false,
+      builder: (context) =>
+          AnnouncementDialog(announcement: bealibAnnouncement),
     );
     if (markSeen) {
       await GStorage.putSetting(

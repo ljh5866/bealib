@@ -7,9 +7,7 @@ const BealibAnnouncement bealibAnnouncement = BealibAnnouncement(
   title: '公告',
   updatedAt: '2026-10-22',
   content: '''
-在这里写公告内容。
-
-把这几行占位文字替换成你要说的话即可。''',
+因为一些原因决定暂停维护此项目，但项目趋于稳定，可通过邮箱联系2442852575@qq.com。''',
 );
 
 class BealibAnnouncement {

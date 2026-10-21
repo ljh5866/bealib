@@ -17,7 +17,9 @@ class AnnouncementDialog extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final TextTheme text = theme.textTheme;
 
-    return AlertDialog(
+    return PopScope(
+      canPop: false,
+      child: AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       title: Row(
         children: [
@@ -91,6 +93,7 @@ class AnnouncementDialog extends StatelessWidget {
           child: const Text('我知道了'),
         ),
       ],
+      ),
     );
   }
 }
